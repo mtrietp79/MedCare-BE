@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.entity;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "accounts")
@@ -17,9 +18,15 @@ public class Account {
     private String password;
 
     @Column(nullable = false)
-    private String role; // Sẽ lưu các giá trị như: "ROLE_ADMIN", "ROLE_DOCTOR", "ROLE_PATIENT"
+    private String role;
 
-    // Bắt buộc phải có Constructors
+    // --- CÁC TRƯỜNG MỚI CHO QUÊN MẬT KHẨU ---
+    @Column(name = "reset_otp")
+    private String resetOtp;
+
+    @Column(name = "otp_expiry_time")
+    private LocalDateTime otpExpiryTime;
+
     public Account() {}
 
     public Account(String username, String password, String role) {
@@ -29,35 +36,21 @@ public class Account {
     }
 
     // Getters và Setters
-    public Integer getId() {
-        return id;
-    }
+    public Integer getId() { return id; }
+    public void setId(Integer id) { this.id = id; }
 
-    public void setId(Integer id) {
-        this.id = id;
-    }
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
 
-    public String getUsername() {
-        return username;
-    }
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
 
-    public void setUsername(String username) {
-        this.username = username;
-    }
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
 
-    public String getPassword() {
-        return password;
-    }
+    public String getResetOtp() { return resetOtp; }
+    public void setResetOtp(String resetOtp) { this.resetOtp = resetOtp; }
 
-    public void setPassword(String password) {
-        this.password = password;
-    }
-
-    public String getRole() {
-        return role;
-    }
-
-    public void setRole(String role) {
-        this.role = role;
-    }
+    public LocalDateTime getOtpExpiryTime() { return otpExpiryTime; }
+    public void setOtpExpiryTime(LocalDateTime otpExpiryTime) { this.otpExpiryTime = otpExpiryTime; }
 }

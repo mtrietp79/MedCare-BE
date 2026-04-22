@@ -14,4 +14,6 @@ public interface DoctorScheduleRepository extends JpaRepository<DoctorSchedule, 
 
     // Tìm lịch trực của một bác sĩ cụ thể
     List<DoctorSchedule> findByDoctorId(Integer doctorId);
+
+    List<DoctorSchedule> findByDoctorIdAndWorkDate(Integer doctorId, LocalDate workDate);
 }

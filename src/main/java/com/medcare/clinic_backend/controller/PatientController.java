@@ -17,7 +17,7 @@ public class PatientController {
     private PatientService patientService;
 
     @GetMapping
-    @PreAuthorize("hasAuthority('ROLE_DOCTOR')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
     public List<Patient> getAll() {
         return patientService.getAllPatients();
     }

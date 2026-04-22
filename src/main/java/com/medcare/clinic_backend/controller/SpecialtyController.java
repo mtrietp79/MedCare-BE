@@ -27,7 +27,7 @@ public class SpecialtyController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_DOCTOR')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
     public Specialty create(@RequestBody Specialty specialty) {
         // @RequestBody sẽ tự động chuyển dữ liệu JSON từ ReactJS thành object Specialty trong Java
         return specialtyService.createSpecialty(specialty);

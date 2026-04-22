@@ -17,7 +17,27 @@ public class MedicineService {
         return medicineRepository.findAll();
     }
 
+    public Medicine getMedicineById(Integer id) {
+        return medicineRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy thuốc có ID: " + id));
+    }
+
     public Medicine createMedicine(Medicine medicine) {
         return medicineRepository.save(medicine);
+    }
+
+    public Medicine updateMedicine(Integer id, Medicine medicineDetails) {
+        Medicine existingMedicine = getMedicineById(id);
+
+        // Cập nhật các trường thông tin (Ông nhớ sửa lại tên các hàm get/set cho đúng với Entity của ông nhé)
+        existingMedicine.setName(medicineDetails.getName());
+        // existingMedicine.setPrice(medicineDetails.getPrice());
+        // existingMedicine.setQuantity(medicineDetails.getQuantity());
+
+        return medicineRepository.save(existingMedicine);
+    }
+
+    public void deleteMedicine(Integer id) {
+        medicineRepository.deleteById(id);
     }
 }
