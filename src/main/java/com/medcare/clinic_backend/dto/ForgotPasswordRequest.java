@@ -1,21 +1,19 @@
 package com.medcare.clinic_backend.dto;
 
 public class ForgotPasswordRequest {
-    private String email;
+    private String username;
 
-    // Constructor
     public ForgotPasswordRequest() {}
 
-    public ForgotPasswordRequest(String email) {
-        this.email = email;
+    public ForgotPasswordRequest(String username) {
+        this.username = username;
     }
 
-    // Getters và Setters
-    public String getEmail() {
-        return email;
+    public String getUsername() {
+        return username;
     }
 
-    public void setEmail(String email) {
-        this.email = email;
+    public void setUsername(String username) {
+        this.username = username;
     }
 }

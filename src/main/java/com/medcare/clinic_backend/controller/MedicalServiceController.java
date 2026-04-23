@@ -15,11 +15,13 @@ public class MedicalServiceController {
     private MedicalServiceService service;
 
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
     public List<MedicalService> getAll() {
         return service.getAll();
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
     public MedicalService create(@RequestBody MedicalService medicalService) {
         return service.create(medicalService);
     }

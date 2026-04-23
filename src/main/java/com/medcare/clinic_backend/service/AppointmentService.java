@@ -4,20 +4,31 @@ import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.DoctorSchedule;
+import com.medcare.clinic_backend.entity.Specialty;
+import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
 import com.medcare.clinic_backend.repository.DoctorScheduleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class AppointmentService {
+
+    private static final Set<String> ALLOWED_STATUSES = Set.of("PENDING", "CONFIRMED", "COMPLETED", "CANCELLED");
+    private static final int MIN_BOOKING_LEAD_HOURS = 2;
 
     @Autowired
     private AppointmentRepository appointmentRepository;
@@ -28,70 +39,85 @@ public class AppointmentService {
     @Autowired
     private DoctorRepository doctorRepository;
 
+    @Autowired
+    private PatientService patientService;
+
+    @Autowired
+    private AppointmentNotificationService appointmentNotificationService;
+
     public List<Appointment> getAllAppointments() {
         return appointmentRepository.findAll();
     }
 
-    public Appointment getAppointmentById(Integer id) {
-        return appointmentRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Khong tim thay lich hen ID: " + id));
+    public List<Appointment> getAppointmentsForPatient(Integer patientId) {
+        return appointmentRepository.findByPatientIdOrderByAppointmentDateDesc(patientId);
     }
 
+    public List<Appointment> getAppointmentsForDoctor(Integer doctorId) {
+        return appointmentRepository.findByDoctorIdOrderByAppointmentDateDesc(doctorId);
+    }
+
+    public Appointment getAppointmentById(Integer id) {
+        return appointmentRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen ID: " + id));
+    }
+
+    public Appointment getAppointmentByIdForPatient(Integer id, Integer patientId) {
+        return appointmentRepository.findByIdAndPatientId(id, patientId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen ID: " + id));
+    }
+
+    public Appointment getAppointmentByIdForDoctor(Integer id, Integer doctorId) {
+        return appointmentRepository.findByIdAndDoctorId(id, doctorId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen ID: " + id));
+    }
+
+    @Transactional
     public Appointment createAppointment(Appointment app) {
+        if (app == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Du lieu lich hen khong hop le.");
+        }
+
+        Integer patientId = app.getPatient() == null ? null : app.getPatient().getId();
+        patientService.ensureProfileCompleted(patientId);
+
         SlotRule slotRule = resolveSlotRule(app.getAppointmentDate());
+        app.setAppointmentDate(slotRule.start());
+        app.setStatus("PENDING");
+        app.setAppointmentCode(generateAppointmentCode());
+
+        validateBookingTimeRule(slotRule.start());
+        validatePatientAvailability(patientId, slotRule, null);
 
         if (app.getDoctor() != null && app.getDoctor().getId() != null) {
-            Doctor doctor = fetchDoctor(app.getDoctor().getId());
-            validateDoctorAvailability(doctor, slotRule);
+            Doctor doctor = fetchDoctorForUpdate(app.getDoctor().getId());
+            ensureSpecialtyForDoctor(app, doctor);
+            validateDoctorAvailability(doctor, slotRule, null);
             applyDoctorPricing(app, doctor);
-            return appointmentRepository.save(app);
+            Appointment savedAppointment = appointmentRepository.save(app);
+            appointmentNotificationService.sendAppointmentTicket(savedAppointment);
+            return savedAppointment;
         }
 
-        if (app.getSpecialty() != null && app.getSpecialty().getId() != null) {
-            List<DoctorSchedule> availableSchedules = scheduleRepository.findByWorkDate(slotRule.date());
-            Doctor selectedDoctor = null;
-            long minPatientCount = Long.MAX_VALUE;
-
-            for (DoctorSchedule schedule : availableSchedules) {
-                Doctor doctor = schedule.getDoctor();
-                if (doctor == null || doctor.getSpecialty() == null) {
-                    continue;
-                }
-
-                if (!doctor.getSpecialty().getId().equals(app.getSpecialty().getId())) {
-                    continue;
-                }
-
-                if (!isScheduleMatchingShift(schedule, slotRule.shift())) {
-                    continue;
-                }
-
-                long currentCount = appointmentRepository.countByDoctorInSlot(
-                        doctor.getId(),
-                        slotRule.start(),
-                        slotRule.end()
-                );
-
-                if (currentCount < slotRule.maxPatients() && currentCount < minPatientCount) {
-                    minPatientCount = currentCount;
-                    selectedDoctor = doctor;
-                }
-            }
-
-            if (selectedDoctor == null) {
-                throw new RuntimeException("Hien tai tat ca bac si thuoc khoa nay da kin lich trong khung gio ban chon.");
-            }
-
-            applyDoctorPricing(app, selectedDoctor);
-            return appointmentRepository.save(app);
+        if (app.getSpecialty() == null || app.getSpecialty().getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Vui long cung cap it nhat chuyen khoa hoac bac si de dat lich.");
         }
 
-        throw new RuntimeException("Vui long cung cap it nhat chuyen khoa hoac bac si de dat lich.");
+        Doctor selectedDoctor = findAvailableDoctorForSpecialty(app.getSpecialty().getId(), slotRule);
+        if (selectedDoctor == null) {
+            throw new BusinessException(HttpStatus.CONFLICT, "Hien tai tat ca bac si thuoc khoa nay da kin lich trong khung gio ban chon.");
+        }
+
+        app.setSpecialty(selectedDoctor.getSpecialty());
+        applyDoctorPricing(app, selectedDoctor);
+        Appointment savedAppointment = appointmentRepository.save(app);
+        appointmentNotificationService.sendAppointmentTicket(savedAppointment);
+        return savedAppointment;
     }
 
     public List<SlotAvailabilityDto> getDoctorSlotStatus(Integer doctorId, LocalDate date) {
         if (date == null) {
-            throw new RuntimeException("Thieu ngay can kiem tra slot.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu ngay can kiem tra slot.");
         }
 
         Doctor doctor = fetchDoctor(doctorId);
@@ -104,7 +130,8 @@ public class AppointmentService {
                     ? appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end())
                     : 0L;
             boolean full = onShift && bookedPatients >= slotRule.maxPatients();
-            boolean disabled = !onShift || full;
+            boolean blockedByTime = !isSlotAllowedByCurrentTime(slotRule.start());
+            boolean disabled = blockedByTime || !onShift || full;
 
             result.add(new SlotAvailabilityDto(
                     slotRule.start(),
@@ -120,46 +147,255 @@ public class AppointmentService {
         return result;
     }
 
+    @Transactional
     public Appointment updateAppointment(Integer id, Appointment appointmentDetails) {
-        Appointment appointment = appointmentRepository.findById(id).orElse(null);
-        if (appointment == null) {
-            return null;
+        Appointment appointment = appointmentRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen ID: " + id));
+
+        if (appointmentDetails == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Du lieu cap nhat khong hop le.");
         }
 
-        appointment.setPatient(appointmentDetails.getPatient());
-        appointment.setSpecialty(appointmentDetails.getSpecialty());
-        appointment.setDoctor(appointmentDetails.getDoctor());
-        appointment.setAppointmentDate(appointmentDetails.getAppointmentDate());
-        appointment.setStatus(appointmentDetails.getStatus());
-        appointment.setSymptoms(appointmentDetails.getSymptoms());
-        appointment.setConsultationFee(resolveConsultationFee(appointmentDetails.getDoctor()));
+        Integer targetDoctorId = extractDoctorId(appointmentDetails.getDoctor(), appointment.getDoctor());
+        if (targetDoctorId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich hen phai co bac si.");
+        }
+
+        boolean doctorChanged = isDoctorChanged(appointment, appointmentDetails.getDoctor());
+        boolean dateChanged = isDateChanged(appointment, appointmentDetails.getAppointmentDate());
+        boolean mustRevalidateSlot = doctorChanged || dateChanged;
+
+        Doctor targetDoctor;
+        if (mustRevalidateSlot) {
+            LocalDateTime targetDate = appointmentDetails.getAppointmentDate() != null
+                    ? appointmentDetails.getAppointmentDate()
+                    : appointment.getAppointmentDate();
+
+            SlotRule slotRule = resolveSlotRule(targetDate);
+            validateBookingTimeRule(slotRule.start());
+            validatePatientAvailability(appointment.getPatient() == null ? null : appointment.getPatient().getId(), slotRule, appointment.getId());
+            targetDoctor = fetchDoctorForUpdate(targetDoctorId);
+            applyUpdatedSpecialty(appointment, appointmentDetails, targetDoctor);
+            validateDoctorAvailability(targetDoctor, slotRule, appointment.getId());
+            appointment.setAppointmentDate(slotRule.start());
+        } else {
+            targetDoctor = fetchDoctor(targetDoctorId);
+            applyUpdatedSpecialty(appointment, appointmentDetails, targetDoctor);
+        }
+
+        appointment.setDoctor(targetDoctor);
+        appointment.setConsultationFee(resolveConsultationFee(targetDoctor));
+
+        if (appointmentDetails.getStatus() != null && !appointmentDetails.getStatus().isBlank()) {
+            validateStatus(appointmentDetails.getStatus());
+            appointment.setStatus(appointmentDetails.getStatus().trim().toUpperCase());
+        }
+
+        if (appointmentDetails.getSymptoms() != null) {
+            appointment.setSymptoms(appointmentDetails.getSymptoms());
+        }
+
+        if (appointmentDetails.getNotes() != null) {
+            appointment.setNotes(appointmentDetails.getNotes());
+        }
+
+        if (appointmentDetails.getPaymentStatus() != null && !appointmentDetails.getPaymentStatus().isBlank()) {
+            appointment.setPaymentStatus(appointmentDetails.getPaymentStatus());
+        }
+
         return appointmentRepository.save(appointment);
     }
 
+    @Transactional
     public void deleteAppointment(Integer id) {
+        if (!appointmentRepository.existsById(id)) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen ID: " + id);
+        }
         appointmentRepository.deleteById(id);
+    }
+
+    private Doctor findAvailableDoctorForSpecialty(Integer specialtyId, SlotRule slotRule) {
+        List<Integer> candidateDoctorIds = scheduleRepository.findByWorkDate(slotRule.date()).stream()
+                .filter(schedule -> isScheduleMatchingShift(schedule, slotRule.shift()))
+                .map(DoctorSchedule::getDoctor)
+                .filter(doctor -> doctor != null && doctor.getSpecialty() != null)
+                .filter(doctor -> doctor.getSpecialty().getId().equals(specialtyId))
+                .map(Doctor::getId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
+
+        if (candidateDoctorIds.isEmpty()) {
+            return null;
+        }
+
+        Map<Integer, Long> loadMap = candidateDoctorIds.stream()
+                .collect(Collectors.toMap(
+                        doctorId -> doctorId,
+                        doctorId -> appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end())
+                ));
+
+        List<Integer> orderedDoctorIds = candidateDoctorIds.stream()
+                .sorted(Comparator
+                        .comparingLong((Integer doctorId) -> loadMap.getOrDefault(doctorId, Long.MAX_VALUE))
+                        .thenComparingInt(doctorId -> doctorId))
+                .collect(Collectors.toList());
+
+        for (Integer doctorId : orderedDoctorIds) {
+            Doctor lockedDoctor = fetchDoctorForUpdate(doctorId);
+            long currentCount = appointmentRepository.countByDoctorInSlot(lockedDoctor.getId(), slotRule.start(), slotRule.end());
+            if (currentCount < slotRule.maxPatients()) {
+                return lockedDoctor;
+            }
+        }
+
+        return null;
+    }
+
+    private Integer extractDoctorId(Doctor fromRequest, Doctor fromExisting) {
+        if (fromRequest != null && fromRequest.getId() != null) {
+            return fromRequest.getId();
+        }
+        if (fromExisting != null && fromExisting.getId() != null) {
+            return fromExisting.getId();
+        }
+        return null;
+    }
+
+    private boolean isDoctorChanged(Appointment existing, Doctor requestedDoctor) {
+        if (requestedDoctor == null || requestedDoctor.getId() == null) {
+            return false;
+        }
+        Integer existingDoctorId = existing.getDoctor() == null ? null : existing.getDoctor().getId();
+        return !requestedDoctor.getId().equals(existingDoctorId);
+    }
+
+    private boolean isDateChanged(Appointment existing, LocalDateTime requestedDate) {
+        if (requestedDate == null) {
+            return false;
+        }
+        LocalDateTime normalizedRequested = requestedDate.withSecond(0).withNano(0);
+        LocalDateTime normalizedExisting = existing.getAppointmentDate() == null
+                ? null
+                : existing.getAppointmentDate().withSecond(0).withNano(0);
+        return !normalizedRequested.equals(normalizedExisting);
     }
 
     private Doctor fetchDoctor(Integer doctorId) {
         if (doctorId == null) {
-            throw new RuntimeException("Thieu doctorId.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu doctorId.");
         }
         return doctorRepository.findById(doctorId)
-                .orElseThrow(() -> new RuntimeException("Khong tim thay bac si ID: " + doctorId));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + doctorId));
     }
 
-    private void validateDoctorAvailability(Doctor doctor, SlotRule slotRule) {
+    private Doctor fetchDoctorForUpdate(Integer doctorId) {
+        if (doctorId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu doctorId.");
+        }
+        return doctorRepository.findByIdForUpdate(doctorId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + doctorId));
+    }
+
+    private void validateDoctorAvailability(Doctor doctor, SlotRule slotRule, Integer excludedAppointmentId) {
         List<DoctorSchedule> schedules = scheduleRepository.findByDoctorIdAndWorkDate(doctor.getId(), slotRule.date());
         boolean availableInShift = schedules.stream().anyMatch(schedule -> isScheduleMatchingShift(schedule, slotRule.shift()));
 
         if (!availableInShift) {
-            throw new RuntimeException("Bac si khong co lich truc trong ca ban chon.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si khong co lich truc trong ca ban chon.");
         }
 
-        long count = appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end());
+        long count = excludedAppointmentId == null
+                ? appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end())
+                : appointmentRepository.countByDoctorInSlotExcludingAppointment(doctor.getId(), slotRule.start(), slotRule.end(), excludedAppointmentId);
+
         if (count >= slotRule.maxPatients()) {
-            throw new RuntimeException("Khung gio nay cua bac si da day. Vui long chon gio khac.");
+            throw new BusinessException(HttpStatus.CONFLICT, "Khung gio nay cua bac si da day. Vui long chon gio khac.");
         }
+    }
+
+    private void validatePatientAvailability(Integer patientId, SlotRule slotRule, Integer excludedAppointmentId) {
+        if (patientId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong xac dinh duoc benh nhan dat lich.");
+        }
+
+        long count = excludedAppointmentId == null
+                ? appointmentRepository.countByPatientInSlot(patientId, slotRule.start(), slotRule.end())
+                : appointmentRepository.countByPatientInSlotExcludingAppointment(
+                patientId,
+                slotRule.start(),
+                slotRule.end(),
+                excludedAppointmentId
+        );
+
+        if (count > 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "Ban da co lich hen trong khung gio nay.");
+        }
+    }
+
+    private void validateBookingTimeRule(LocalDateTime slotStart) {
+        LocalDateTime now = LocalDateTime.now();
+        if (slotStart.isBefore(now)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the dat lich o thoi diem da qua.");
+        }
+
+        LocalDateTime minAllowedStart = now.plusHours(MIN_BOOKING_LEAD_HOURS);
+        if (slotStart.isBefore(minAllowedStart)) {
+            throw new BusinessException(
+                    HttpStatus.BAD_REQUEST,
+                    "Lich hen phai dat truoc it nhat " + MIN_BOOKING_LEAD_HOURS + " tieng theo thoi gian hien tai."
+            );
+        }
+    }
+
+    private boolean isSlotAllowedByCurrentTime(LocalDateTime slotStart) {
+        LocalDateTime minAllowedStart = LocalDateTime.now().plusHours(MIN_BOOKING_LEAD_HOURS);
+        return !slotStart.isBefore(minAllowedStart);
+    }
+
+    private void ensureSpecialtyForDoctor(Appointment appointment, Doctor doctor) {
+        Specialty doctorSpecialty = doctor.getSpecialty();
+        if (doctorSpecialty == null || doctorSpecialty.getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si chua duoc gan chuyen khoa.");
+        }
+
+        if (appointment.getSpecialty() == null || appointment.getSpecialty().getId() == null) {
+            appointment.setSpecialty(doctorSpecialty);
+            return;
+        }
+
+        if (!appointment.getSpecialty().getId().equals(doctorSpecialty.getId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si khong thuoc chuyen khoa da chon.");
+        }
+
+        appointment.setSpecialty(doctorSpecialty);
+    }
+
+    private void applyUpdatedSpecialty(Appointment appointment, Appointment appointmentDetails, Doctor doctor) {
+        Specialty requestSpecialty = appointmentDetails.getSpecialty();
+        Specialty doctorSpecialty = doctor.getSpecialty();
+
+        if (doctorSpecialty == null || doctorSpecialty.getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si chua duoc gan chuyen khoa.");
+        }
+
+        if (requestSpecialty != null && requestSpecialty.getId() != null) {
+            if (!requestSpecialty.getId().equals(doctorSpecialty.getId())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si khong thuoc chuyen khoa da chon.");
+            }
+            appointment.setSpecialty(doctorSpecialty);
+            return;
+        }
+
+        if (appointment.getSpecialty() != null && appointment.getSpecialty().getId() != null) {
+            if (!appointment.getSpecialty().getId().equals(doctorSpecialty.getId())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si khong thuoc chuyen khoa hien tai cua lich hen.");
+            }
+            appointment.setSpecialty(doctorSpecialty);
+            return;
+        }
+
+        appointment.setSpecialty(doctorSpecialty);
     }
 
     private void applyDoctorPricing(Appointment appointment, Doctor doctor) {
@@ -172,13 +408,24 @@ public class AppointmentService {
             return null;
         }
 
-        Doctor persistedDoctor = fetchDoctor(doctor.getId());
-        BigDecimal price = persistedDoctor.getPrice();
+        BigDecimal price = doctor.getPrice();
         if (price == null) {
-            throw new RuntimeException("Bac si chua co gia kham. Vui long cap nhat gia cho bac si ID: " + doctor.getId());
+            Doctor persistedDoctor = fetchDoctor(doctor.getId());
+            price = persistedDoctor.getPrice();
+        }
+
+        if (price == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si chua co gia kham. Vui long cap nhat gia cho bac si ID: " + doctor.getId());
         }
 
         return price.doubleValue();
+    }
+
+    private void validateStatus(String status) {
+        String normalizedStatus = status.trim().toUpperCase();
+        if (!ALLOWED_STATUSES.contains(normalizedStatus)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Trang thai lich hen khong hop le.");
+        }
     }
 
     private boolean isScheduleMatchingShift(DoctorSchedule schedule, String requiredShift) {
@@ -202,7 +449,7 @@ public class AppointmentService {
 
     private SlotRule resolveSlotRule(LocalDateTime appointmentDate) {
         if (appointmentDate == null) {
-            throw new RuntimeException("Thieu thoi gian dat lich.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu thoi gian dat lich.");
         }
 
         LocalDateTime normalizedDateTime = appointmentDate.withSecond(0).withNano(0);
@@ -212,7 +459,16 @@ public class AppointmentService {
             }
         }
 
-        throw new RuntimeException("Gio dat lich khong hop le. Chi ho tro 07:30, 08:00, 09:00, 10:00, 12:30, 13:00, 14:00, 15:00.");
+        throw new BusinessException(HttpStatus.BAD_REQUEST,
+                "Gio dat lich khong hop le. Chi ho tro 07:30, 08:00, 09:00, 10:00, 12:30, 13:00, 14:00, 15:00.");
+    }
+
+    private String generateAppointmentCode() {
+        String code;
+        do {
+            code = "PKB-" + System.currentTimeMillis();
+        } while (appointmentRepository.existsByAppointmentCode(code));
+        return code;
     }
 
     private List<SlotRule> buildDailySlotRules(LocalDate date) {

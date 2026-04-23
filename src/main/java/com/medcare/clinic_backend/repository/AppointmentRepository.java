@@ -4,12 +4,14 @@ import com.medcare.clinic_backend.entity.Appointment;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
+import com.medcare.clinic_backend.entity.Patient;
 
 public interface AppointmentRepository extends JpaRepository<Appointment, Integer> {
 
-    // 1. Đếm số lượng cuộc hẹn của 1 bác sĩ trong slot (đã có của ông)
     @Query("SELECT COUNT(a) FROM Appointment a WHERE a.doctor.id = :doctorId " +
             "AND a.appointmentDate >= :start AND a.appointmentDate < :end " +
             "AND a.status != 'CANCELLED'")
@@ -17,14 +19,48 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
                              @Param("start") LocalDateTime start,
                              @Param("end") LocalDateTime end);
 
-    // 2. Đếm số lịch hẹn trong một khoảng thời gian (Dùng để đếm lịch hẹn hôm nay)
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.doctor.id = :doctorId " +
+            "AND a.appointmentDate >= :start AND a.appointmentDate < :end " +
+            "AND a.status != 'CANCELLED' AND a.id <> :appointmentId")
+    long countByDoctorInSlotExcludingAppointment(@Param("doctorId") Integer doctorId,
+                                                 @Param("start") LocalDateTime start,
+                                                 @Param("end") LocalDateTime end,
+                                                 @Param("appointmentId") Integer appointmentId);
+
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.patient.id = :patientId " +
+            "AND a.appointmentDate >= :start AND a.appointmentDate < :end " +
+            "AND a.status != 'CANCELLED'")
+    long countByPatientInSlot(@Param("patientId") Integer patientId,
+                              @Param("start") LocalDateTime start,
+                              @Param("end") LocalDateTime end);
+
+    @Query("SELECT COUNT(a) FROM Appointment a WHERE a.patient.id = :patientId " +
+            "AND a.appointmentDate >= :start AND a.appointmentDate < :end " +
+            "AND a.status != 'CANCELLED' AND a.id <> :appointmentId")
+    long countByPatientInSlotExcludingAppointment(@Param("patientId") Integer patientId,
+                                                  @Param("start") LocalDateTime start,
+                                                  @Param("end") LocalDateTime end,
+                                                  @Param("appointmentId") Integer appointmentId);
+
     long countByAppointmentDateBetween(LocalDateTime start, LocalDateTime end);
 
-    // 3. Lấy 5 lịch hẹn mới nhất để hiện ở bảng Dashboard
     List<Appointment> findTop5ByOrderByAppointmentDateDesc();
 
-    // 4. Tính tổng doanh thu (Giả sử thực thể Appointment có trường 'fee' hoặc 'price')
-    // Nếu ông đặt tên trường khác thì sửa lại 'a.fee' thành tên đó nhé
+    List<Appointment> findByPatientIdOrderByAppointmentDateDesc(Integer patientId);
+
+    List<Appointment> findByDoctorIdOrderByAppointmentDateDesc(Integer doctorId);
+
+    Optional<Appointment> findByIdAndPatientId(Integer id, Integer patientId);
+
+    Optional<Appointment> findByIdAndDoctorId(Integer id, Integer doctorId);
+
+    @Query("SELECT DISTINCT a.patient FROM Appointment a WHERE a.doctor.id = :doctorId ORDER BY a.patient.fullName ASC")
+    List<Patient> findDistinctPatientsByDoctorId(@Param("doctorId") Integer doctorId);
+
+    boolean existsByDoctorIdAndPatientId(Integer doctorId, Integer patientId);
+
+    boolean existsByAppointmentCode(String appointmentCode);
+
     @Query("SELECT SUM(a.consultationFee) FROM Appointment a WHERE a.status = 'COMPLETED'")
     Double calculateTotalRevenue();
 }

@@ -16,11 +16,13 @@ public class MedicineController {
     private MedicineService medicineService;
 
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
     public List<Medicine> getAll() {
         return medicineService.getAllMedicines();
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
     public Medicine getById(@PathVariable Integer id) {
         return medicineService.getMedicineById(id);
     }

@@ -1,26 +1,24 @@
 package com.medcare.clinic_backend.dto;
 
 public class ResetPasswordRequest {
-    private String email;
+    private String username;
     private String otp;
     private String newPassword;
 
-    // Constructor
     public ResetPasswordRequest() {}
 
-    public ResetPasswordRequest(String email, String otp, String newPassword) {
-        this.email = email;
+    public ResetPasswordRequest(String username, String otp, String newPassword) {
+        this.username = username;
         this.otp = otp;
         this.newPassword = newPassword;
     }
 
-    // Getters và Setters
-    public String getEmail() {
-        return email;
+    public String getUsername() {
+        return username;
     }
 
-    public void setEmail(String email) {
-        this.email = email;
+    public void setUsername(String username) {
+        this.username = username;
     }
 
     public String getOtp() {

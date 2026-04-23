@@ -9,6 +9,9 @@ import java.util.Optional;
 @Repository
 public interface PatientRepository extends JpaRepository<Patient, Integer> {
 
-    // Spring Boot sẽ tự hiểu: Tìm Patient -> Váo bên trong Account -> Tìm bằng Username
     Optional<Patient> findByAccount_Username(String username);
+
+    boolean existsByPhoneAndIdNot(String phone, Integer id);
+
+    boolean existsByNationalIdAndIdNot(String nationalId, Integer id);
 }

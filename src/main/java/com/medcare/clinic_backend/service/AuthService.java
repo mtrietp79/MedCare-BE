@@ -1,25 +1,32 @@
 package com.medcare.clinic_backend.service;
 
-import com.medcare.clinic_backend.entity.Account;
-import com.medcare.clinic_backend.repository.AccountRepository;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
+import com.medcare.clinic_backend.entity.Account;
+import com.medcare.clinic_backend.repository.AccountRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
+import com.medcare.clinic_backend.exception.BusinessException;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 @Service
 public class AuthService {
+
+    private static final Set<String> ALLOWED_ROLES = Set.of("ROLE_PATIENT", "ROLE_DOCTOR", "ROLE_ADMIN");
+    private static final Pattern GMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9._%+-]+@gmail\\.com$");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^(0|\\+84)\\d{9,10}$");
 
     @Autowired
     private AccountRepository accountRepository;
@@ -28,58 +35,87 @@ public class AuthService {
     private PasswordEncoder passwordEncoder;
 
     @Autowired
-    private JavaMailSender mailSender; // Cần thư viện starter-mail trong pom.xml
+    private PatientService patientService;
 
-    private final String GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID";
+    @Autowired
+    private OtpDeliveryService otpDeliveryService;
 
-    // ==========================================
-    // 1. HÀM ĐĂNG KÝ (Bị thiếu đã được thêm lại)
-    // ==========================================
+    private final String googleClientId = "YOUR_GOOGLE_CLIENT_ID";
+
+    @Transactional
     public String register(Account account) {
-        // Kiểm tra xem email đã tồn tại chưa
-        if (accountRepository.findByUsername(account.getUsername()).isPresent()) {
-            return "Lỗi: Email đã tồn tại trên hệ thống!";
+        if (account == null) {
+            return "Loi: Du lieu tai khoan khong hop le!";
+        }
+        if (account.getUsername() == null || account.getUsername().isBlank()) {
+            return "Loi: Username khong duoc de trong!";
+        }
+        if (account.getPassword() == null || account.getPassword().isBlank()) {
+            return "Loi: Mat khau khong duoc de trong!";
         }
 
-        // Mã hóa mật khẩu và lưu vào DB
-        account.setPassword(passwordEncoder.encode(account.getPassword()));
-        accountRepository.save(account);
+        String normalizedRole = normalizeRole(account.getRole());
+        if (!ALLOWED_ROLES.contains(normalizedRole)) {
+            return "Loi: Role khong hop le!";
+        }
+        String normalizedUsername = "ROLE_PATIENT".equals(normalizedRole)
+                ? normalizeIdentifier(account.getUsername())
+                : normalizeText(account.getUsername());
+        if (normalizedUsername == null) {
+            return "Loi: Patient chi duoc dang ky bang Gmail hoac so dien thoai!";
+        }
+        if (accountRepository.findByUsername(normalizedUsername).isPresent()) {
+            return "Loi: Tai khoan da ton tai tren he thong!";
+        }
 
-        return "Đăng ký thành công!";
+        createAccount(normalizedUsername, account.getPassword(), normalizedRole, null, false);
+        return "Dang ky thanh cong!";
     }
 
-    // ==========================================
-    // 2. Logic Quên mật khẩu: Tạo mã và gửi Mail
-    // ==========================================
-    public void processForgotPassword(String email) throws Exception {
-        Account account = accountRepository.findByUsername(email)
-                .orElseThrow(() -> new Exception("Email không tồn tại trên hệ thống!"));
+    public String registerDoctorAccount(String username, String password) {
+        Account doctorAccount = new Account(username, password, "ROLE_DOCTOR");
+        return register(doctorAccount);
+    }
 
-        String otp = String.format("%06d", new Random().nextInt(999999));
+    public String getRoleByUsername(String username) {
+        return accountRepository.findByUsername(username)
+                .map(Account::getRole)
+                .map(this::normalizeRole)
+                .orElse("ROLE_PATIENT");
+    }
+
+    @Transactional
+    public Map<String, String> processForgotPassword(String username) {
+        String normalizedUsername = normalizeIdentifier(username);
+        if (normalizedUsername == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Chi ho tro khoi phuc bang Gmail hoac so dien thoai.");
+        }
+
+        Account account = accountRepository.findByUsername(normalizedUsername)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Tai khoan khong ton tai!"));
+
+        String otp = generateOtp();
         account.setResetOtp(otp);
         account.setOtpExpiryTime(LocalDateTime.now().plusMinutes(5));
         accountRepository.save(account);
 
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setTo(email);
-        message.setSubject("Mã OTP khôi phục mật khẩu - MedCare");
-        message.setText("Mã OTP của bạn là: " + otp + ". Hiệu lực trong 5 phút.");
-        mailSender.send(message);
+        return otpDeliveryService.sendPasswordResetOtp(normalizedUsername, otp, isGmail(normalizedUsername));
     }
 
-    // ==========================================
-    // 3. Logic Đổi mật khẩu mới
-    // ==========================================
-    public void resetPassword(String email, String otp, String newPassword) throws Exception {
-        Account account = accountRepository.findByUsername(email)
-                .orElseThrow(() -> new Exception("Tài khoản không tồn tại!"));
-
-        if (account.getResetOtp() == null || !account.getResetOtp().equals(otp)) {
-            throw new Exception("Mã OTP không hợp lệ!");
+    public void resetPassword(String username, String otp, String newPassword) throws Exception {
+        String normalizedUsername = normalizeIdentifier(username);
+        if (normalizedUsername == null) {
+            throw new Exception("Chi ho tro khoi phuc bang Gmail hoac so dien thoai.");
         }
 
-        if (account.getOtpExpiryTime().isBefore(LocalDateTime.now())) {
-            throw new Exception("Mã OTP đã hết hạn!");
+        Account account = accountRepository.findByUsername(normalizedUsername)
+                .orElseThrow(() -> new Exception("Tai khoan khong ton tai!"));
+
+        if (account.getResetOtp() == null || !account.getResetOtp().equals(otp)) {
+            throw new Exception("Ma OTP khong hop le!");
+        }
+        if (account.getOtpExpiryTime() == null || account.getOtpExpiryTime().isBefore(LocalDateTime.now())) {
+            throw new Exception("Ma OTP da het han!");
         }
 
         account.setPassword(passwordEncoder.encode(newPassword));
@@ -88,44 +124,91 @@ public class AuthService {
         accountRepository.save(account);
     }
 
-    // ==========================================
-    // 4. LOGIC ĐĂNG NHẬP GOOGLE
-    // ==========================================
     public String loginWithGoogle(String idTokenString) throws Exception {
         GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
-                .setAudience(Collections.singletonList(GOOGLE_CLIENT_ID))
+                .setAudience(Collections.singletonList(googleClientId))
                 .build();
 
         GoogleIdToken idToken = verifier.verify(idTokenString);
-        if (idToken == null) throw new Exception("Token Google không hợp lệ!");
+        if (idToken == null) {
+            throw new Exception("Token Google khong hop le!");
+        }
         return findOrCreateSocialAccount(idToken.getPayload().getEmail());
     }
 
-    // ==========================================
-    // 5. LOGIC ĐĂNG NHẬP FACEBOOK
-    // ==========================================
     public String loginWithFacebook(String accessToken) throws Exception {
         String fbUrl = "https://graph.facebook.com/me?fields=id,name,email&access_token=" + accessToken;
         RestTemplate restTemplate = new RestTemplate();
         try {
             Map<String, Object> userData = restTemplate.getForEntity(fbUrl, Map.class).getBody();
-            if (userData == null || !userData.containsKey("email")) throw new Exception("Lỗi lấy email FB");
+            if (userData == null || !userData.containsKey("email")) {
+                throw new Exception("Loi lay email Facebook");
+            }
             return findOrCreateSocialAccount((String) userData.get("email"));
-        } catch (Exception e) {
-            throw new Exception("Xác thực Facebook thất bại!");
+        } catch (Exception ex) {
+            throw new Exception("Xac thuc Facebook that bai!");
         }
     }
 
-    // ==========================================
-    // Hàm phụ: Tạo tài khoản nếu đăng nhập MXH lần đầu
-    // ==========================================
     private String findOrCreateSocialAccount(String email) {
-        Account account = accountRepository.findByUsername(email).orElseGet(() -> {
-            // Mật khẩu sẽ được mã hóa bên trong hàm register()
-            Account newAcc = new Account(email, "Social@123", "ROLE_PATIENT");
-            register(newAcc); // Gọi hàm đăng ký ở trên
-            return newAcc;
-        });
-        return account.getUsername();
+        return accountRepository.findByUsername(email)
+                .map(Account::getUsername)
+                .orElseGet(() -> {
+                    createAccount(email, "Social@123", "ROLE_PATIENT", null, false);
+                    return email;
+                });
+    }
+
+    private void createAccount(
+            String username,
+            String password,
+            String normalizedRole,
+            String fullName,
+            boolean passwordAlreadyEncoded
+    ) {
+        Account account = new Account();
+        account.setUsername(username);
+        account.setPassword(passwordAlreadyEncoded ? password : passwordEncoder.encode(password));
+        account.setRole(normalizedRole);
+        Account savedAccount = accountRepository.save(account);
+        if ("ROLE_PATIENT".equals(normalizedRole)) {
+            patientService.createInitialProfileForAccount(savedAccount, fullName);
+        }
+    }
+
+    private String normalizeRole(String role) {
+        String normalized = role == null || role.isBlank() ? "ROLE_PATIENT" : role.trim().toUpperCase();
+        return normalized.startsWith("ROLE_") ? normalized : "ROLE_" + normalized;
+    }
+
+    private String normalizeIdentifier(String username) {
+        String normalized = normalizeText(username);
+        if (normalized == null) {
+            return null;
+        }
+        if (isGmail(normalized)) {
+            return normalized.toLowerCase();
+        }
+        return isPhone(normalized) ? normalized : null;
+    }
+
+    private boolean isGmail(String value) {
+        return value != null && GMAIL_PATTERN.matcher(value).matches();
+    }
+
+    private boolean isPhone(String value) {
+        return value != null && PHONE_PATTERN.matcher(value).matches();
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String generateOtp() {
+        return String.format("%06d", new Random().nextInt(999999));
     }
 }

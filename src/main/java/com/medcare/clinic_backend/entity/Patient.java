@@ -2,9 +2,8 @@ package com.medcare.clinic_backend.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
-import com.medcare.clinic_backend.entity.Account;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.OneToOne;
+
+import java.time.LocalDate;
 
 @Data
 @Entity
@@ -18,21 +17,28 @@ public class Patient {
     @Column(name = "full_name", nullable = false, length = 100)
     private String fullName;
 
-    @Column(nullable = false, length = 15, unique = true)
-    private String phone; // Số điện thoại thường dùng làm tài khoản đăng nhập/đăng ký nên bắt buộc và duy nhất
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
+
+    @Column(length = 15, unique = true)
+    private String phone;
 
     @Column(length = 100)
     private String email;
 
+    @Column(length = 10)
+    private String gender;
+
+    @Column(name = "national_id", length = 12, unique = true)
+    private String nationalId;
+
     @Column(columnDefinition = "TEXT")
     private String address;
 
-    // LIÊN KẾT 1-1 VỚI BẢNG ACCOUNT
+    @Column(name = "profile_completed")
+    private Boolean profileCompleted = false;
+
     @OneToOne
     @JoinColumn(name = "account_id", referencedColumnName = "id")
     private Account account;
-
-    // Nhớ Generate Getter và Setter cho 'account' ở dưới cùng nhé:
-    public Account getAccount() { return account; }
-    public void setAccount(Account account) { this.account = account; }
 }

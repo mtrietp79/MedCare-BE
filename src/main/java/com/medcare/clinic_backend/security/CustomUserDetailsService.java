@@ -22,14 +22,13 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        // Tìm user trong database
         Account account = accountRepository.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("Không tìm thấy tài khoản: " + username));
+                .orElseThrow(() -> new UsernameNotFoundException("Khong tim thay tai khoan: " + username));
 
-        // Cấp quyền (Role) cho user
-        Set<GrantedAuthority> authorities = Collections.singleton(new SimpleGrantedAuthority(account.getRole()));
+        String rawRole = account.getRole() == null ? "" : account.getRole().trim().toUpperCase();
+        String normalizedRole = rawRole.startsWith("ROLE_") ? rawRole : "ROLE_" + rawRole;
+        Set<GrantedAuthority> authorities = Collections.singleton(new SimpleGrantedAuthority(normalizedRole));
 
-        // Trả về đối tượng User của Spring Security
         return new User(account.getUsername(), account.getPassword(), authorities);
     }
 }
