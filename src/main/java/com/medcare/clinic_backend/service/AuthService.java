@@ -7,6 +7,7 @@ import com.google.api.client.json.gson.GsonFactory;
 import com.medcare.clinic_backend.entity.Account;
 import com.medcare.clinic_backend.repository.AccountRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -17,8 +18,9 @@ import com.medcare.clinic_backend.exception.BusinessException;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Random;
+import java.security.SecureRandom;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Service
@@ -27,6 +29,7 @@ public class AuthService {
     private static final Set<String> ALLOWED_ROLES = Set.of("ROLE_PATIENT", "ROLE_DOCTOR", "ROLE_ADMIN");
     private static final Pattern GMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9._%+-]+@gmail\\.com$");
     private static final Pattern PHONE_PATTERN = Pattern.compile("^(0|\\+84)\\d{9,10}$");
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     @Autowired
     private AccountRepository accountRepository;
@@ -40,7 +43,8 @@ public class AuthService {
     @Autowired
     private OtpDeliveryService otpDeliveryService;
 
-    private final String googleClientId = "YOUR_GOOGLE_CLIENT_ID";
+    @Value("${auth.google.client-id:}")
+    private String googleClientId;
 
     @Transactional
     public String register(Account account) {
@@ -102,20 +106,27 @@ public class AuthService {
         return otpDeliveryService.sendPasswordResetOtp(normalizedUsername, otp, isGmail(normalizedUsername));
     }
 
-    public void resetPassword(String username, String otp, String newPassword) throws Exception {
+    @Transactional
+    public void resetPassword(String username, String otp, String newPassword) {
         String normalizedUsername = normalizeIdentifier(username);
         if (normalizedUsername == null) {
-            throw new Exception("Chi ho tro khoi phuc bang Gmail hoac so dien thoai.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Chi ho tro khoi phuc bang Gmail hoac so dien thoai.");
+        }
+        if (otp == null || otp.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ma OTP khong duoc de trong.");
+        }
+        if (newPassword == null || newPassword.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Mat khau moi khong duoc de trong.");
         }
 
         Account account = accountRepository.findByUsername(normalizedUsername)
-                .orElseThrow(() -> new Exception("Tai khoan khong ton tai!"));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Tai khoan khong ton tai!"));
 
         if (account.getResetOtp() == null || !account.getResetOtp().equals(otp)) {
-            throw new Exception("Ma OTP khong hop le!");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ma OTP khong hop le!");
         }
         if (account.getOtpExpiryTime() == null || account.getOtpExpiryTime().isBefore(LocalDateTime.now())) {
-            throw new Exception("Ma OTP da het han!");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ma OTP da het han!");
         }
 
         account.setPassword(passwordEncoder.encode(newPassword));
@@ -125,6 +136,10 @@ public class AuthService {
     }
 
     public String loginWithGoogle(String idTokenString) throws Exception {
+        if (googleClientId == null || googleClientId.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Google Client ID.");
+        }
+
         GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
                 .setAudience(Collections.singletonList(googleClientId))
                 .build();
@@ -151,11 +166,18 @@ public class AuthService {
     }
 
     private String findOrCreateSocialAccount(String email) {
-        return accountRepository.findByUsername(email)
+        String normalizedEmail = normalizeText(email);
+        if (normalizedEmail == null || normalizedEmail.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Tai khoan social khong co email hop le.");
+        }
+        normalizedEmail = normalizedEmail.toLowerCase();
+
+        String finalEmail = normalizedEmail;
+        return accountRepository.findByUsername(normalizedEmail)
                 .map(Account::getUsername)
                 .orElseGet(() -> {
-                    createAccount(email, "Social@123", "ROLE_PATIENT", null, false);
-                    return email;
+                    createAccount(finalEmail, generateRandomSocialPassword(), "ROLE_PATIENT", null, false);
+                    return finalEmail;
                 });
     }
 
@@ -209,6 +231,10 @@ public class AuthService {
     }
 
     private String generateOtp() {
-        return String.format("%06d", new Random().nextInt(999999));
+        return String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
+    }
+
+    private String generateRandomSocialPassword() {
+        return "SOCIAL-" + UUID.randomUUID();
     }
 }

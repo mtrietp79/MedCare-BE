@@ -144,15 +144,14 @@
 
 ```json
 {
-  "message": "Che do do an: chua gui SMS that. OTP duoc tra ve de test.",
-  "channel": "PHONE_DEV",
-  "otp": "123456"
+  "message": "Che do do an: chua gui SMS that. OTP khong tra ve response.",
+  "channel": "PHONE_DEV"
 }
 ```
 
 - Notes:
   - Gmail: OTP is sent to email for real.
-  - Phone number: current project keeps dev mode, OTP is returned in response and logged in backend console for testing.
+  - Phone number: in dev mode, backend can return OTP only when `OTP_EXPOSE_DEV_OTP=true`.
 
 ### `POST /api/auth/reset-password`
 
@@ -595,9 +594,10 @@
 
 ## 17) Payment APIs
 
-### `GET /api/payment/create-url?amount=<amount>&appointmentId=<id>`
+### `GET /api/payment/create-url?appointmentId=<id>`
 
-- Creates VNPay checkout URL
+- Creates VNPay checkout URL.
+- Amount is resolved from backend by appointment consultation fee (client cannot override).
 
 ### `GET /api/payment/vnpay-return?...&appointmentId=<id>`
 

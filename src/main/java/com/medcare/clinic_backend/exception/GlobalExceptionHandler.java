@@ -19,6 +19,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, String>> handleRuntimeException(RuntimeException ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("message", ex.getMessage() == null ? "Internal server error" : ex.getMessage()));
+                .body(Map.of("message", "Da xay ra loi he thong. Vui long thu lai sau."));
     }
 }

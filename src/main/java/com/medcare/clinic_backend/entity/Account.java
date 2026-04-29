@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.entity;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
@@ -23,9 +24,11 @@ public class Account {
     private String role;
 
     // --- CÁC TRƯỜNG MỚI CHO QUÊN MẬT KHẨU ---
+    @JsonIgnore
     @Column(name = "reset_otp")
     private String resetOtp;
 
+    @JsonIgnore
     @Column(name = "otp_expiry_time")
     private LocalDateTime otpExpiryTime;
 

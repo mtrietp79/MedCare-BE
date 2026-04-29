@@ -120,21 +120,13 @@ public class AuthController {
 
     @PostMapping("/forgot-password")
     public ResponseEntity<?> forgotPassword(@RequestBody ForgotPasswordRequest request) {
-        try {
-            return ResponseEntity.ok(authService.processForgotPassword(request.getUsername()));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
-        }
+        return ResponseEntity.ok(authService.processForgotPassword(request.getUsername()));
     }
 
     @PostMapping("/reset-password")
     public ResponseEntity<?> resetPassword(@RequestBody ResetPasswordRequest request) {
-        try {
-            authService.resetPassword(request.getUsername(), request.getOtp(), request.getNewPassword());
-            return ResponseEntity.ok("Dat lai mat khau thanh cong.");
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
-        }
+        authService.resetPassword(request.getUsername(), request.getOtp(), request.getNewPassword());
+        return ResponseEntity.ok("Dat lai mat khau thanh cong.");
     }
 
     private String resolveRole(Authentication authentication, String username) {

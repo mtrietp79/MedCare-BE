@@ -6,4 +6,6 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface TransactionLogRepository extends JpaRepository<TransactionLog, Integer> {
+
+    boolean existsByVnpTransactionNo(String vnpTransactionNo);
 }

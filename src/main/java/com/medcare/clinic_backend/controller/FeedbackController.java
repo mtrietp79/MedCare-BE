@@ -4,6 +4,7 @@ import com.medcare.clinic_backend.entity.Feedback;
 import com.medcare.clinic_backend.service.FeedbackService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
@@ -31,8 +32,8 @@ public class FeedbackController {
     // Gửi đánh giá (Chỉ bệnh nhân mới được gửi)
     @PostMapping
     @PreAuthorize("hasAuthority('ROLE_PATIENT')")
-    public Feedback create(@RequestBody Feedback feedback) {
-        return feedbackService.createFeedback(feedback);
+    public Feedback create(@RequestBody Feedback feedback, Authentication authentication) {
+        return feedbackService.createFeedback(feedback, authentication.getName());
     }
 
     // Xóa đánh giá (Admin dùng để dọn rác)

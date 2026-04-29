@@ -29,8 +29,11 @@ public class OtpDeliveryService {
     @Value("${app.sms.api-key:}")
     private String smsApiKey;
 
-    @Value("${app.otp.phone-dev-mode:true}")
+    @Value("${app.otp.phone-dev-mode:false}")
     private boolean phoneDevMode;
+
+    @Value("${app.otp.expose-dev-otp:false}")
+    private boolean exposeDevOtp;
 
     public Map<String, String> sendPasswordResetOtp(String destination, String otp, boolean emailChannel) {
         if (emailChannel) {
@@ -50,11 +53,15 @@ public class OtpDeliveryService {
         }
 
         if (phoneDevMode) {
-            log.info("DEV OTP for phone {}: {}", destination, otp);
+            log.info("Phone OTP requested in dev mode for {}", destination);
             Map<String, String> response = new LinkedHashMap<>();
-            response.put("message", "Che do do an: chua gui SMS that. OTP duoc tra ve de test.");
             response.put("channel", "PHONE_DEV");
-            response.put("otp", otp);
+            if (exposeDevOtp) {
+                response.put("message", "Che do do an: chua gui SMS that. OTP duoc tra ve de test.");
+                response.put("otp", otp);
+            } else {
+                response.put("message", "Che do do an: chua gui SMS that. OTP khong tra ve response.");
+            }
             return response;
         }
 

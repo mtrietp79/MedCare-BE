@@ -18,6 +18,9 @@ public class PrescriptionDetailService {
     @Autowired
     private MedicalRecordService medicalRecordService;
 
+    @Autowired
+    private InvoiceService invoiceService;
+
     public List<PrescriptionDetail> getPrescriptionByRecordId(Integer recordId) {
         medicalRecordService.getRecordById(recordId);
         return prescriptionDetailRepository.findByMedicalRecordId(recordId);
@@ -31,13 +34,17 @@ public class PrescriptionDetailService {
     public PrescriptionDetail addMedicineToPrescription(PrescriptionDetail detail) {
         validateDetail(detail);
         medicalRecordService.getRecordById(detail.getMedicalRecord().getId());
-        return prescriptionDetailRepository.save(detail);
+        PrescriptionDetail saved = prescriptionDetailRepository.save(detail);
+        invoiceService.recalculateInvoiceForRecord(detail.getMedicalRecord().getId());
+        return saved;
     }
 
     public PrescriptionDetail addMedicineToPrescriptionForDoctor(PrescriptionDetail detail, Integer doctorId) {
         validateDetail(detail);
         medicalRecordService.getRecordByIdForDoctor(detail.getMedicalRecord().getId(), doctorId);
-        return prescriptionDetailRepository.save(detail);
+        PrescriptionDetail saved = prescriptionDetailRepository.save(detail);
+        invoiceService.recalculateInvoiceForRecord(detail.getMedicalRecord().getId());
+        return saved;
     }
 
     private void validateDetail(PrescriptionDetail detail) {

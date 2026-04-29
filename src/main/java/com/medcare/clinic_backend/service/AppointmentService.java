@@ -84,6 +84,7 @@ public class AppointmentService {
         SlotRule slotRule = resolveSlotRule(app.getAppointmentDate());
         app.setAppointmentDate(slotRule.start());
         app.setStatus("PENDING");
+        app.setPaymentStatus("UNPAID");
         app.setAppointmentCode(generateAppointmentCode());
 
         validateBookingTimeRule(slotRule.start());

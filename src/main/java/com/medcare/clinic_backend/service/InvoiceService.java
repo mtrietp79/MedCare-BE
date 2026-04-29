@@ -9,6 +9,7 @@ import com.medcare.clinic_backend.repository.ServiceDetailRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -24,24 +25,30 @@ public class InvoiceService {
     @Autowired
     private ServiceDetailRepository serviceDetailRepository;
 
+    @Transactional
     public Invoice createInvoiceFromRecord(MedicalRecord record) {
-        double medicineFee = prescriptionRepository.findByMedicalRecordId(record.getId())
-                .stream()
-                .mapToDouble(detail -> detail.getQuantity() * detail.getMedicine().getPrice())
-                .sum();
+        if (record == null || record.getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Medical record khong hop le de tao hoa don.");
+        }
 
-        double serviceFee = serviceDetailRepository.findByMedicalRecordId(record.getId())
-                .stream()
-                .mapToDouble(detail -> detail.getQuantity() * detail.getMedicalService().getPrice())
-                .sum();
+        Invoice invoice = invoiceRepository.findByMedicalRecordId(record.getId())
+                .orElseGet(Invoice::new);
 
-        Invoice invoice = new Invoice();
         invoice.setMedicalRecord(record);
-        invoice.setMedicineFee(medicineFee);
-        invoice.setServiceFee(serviceFee);
-        invoice.setTotalAmount(medicineFee + serviceFee);
-        invoice.setStatus("UNPAID");
+        applyInvoiceTotals(invoice, record.getId());
+        invoice.setStatus(invoice.getStatus() == null || invoice.getStatus().isBlank() ? "UNPAID" : invoice.getStatus());
         return invoiceRepository.save(invoice);
+    }
+
+    @Transactional
+    public void recalculateInvoiceForRecord(Integer recordId) {
+        Invoice invoice = invoiceRepository.findByMedicalRecordId(recordId)
+                .orElseThrow(() -> new BusinessException(
+                        HttpStatus.NOT_FOUND,
+                        "Khong tim thay hoa don cho medicalRecordId: " + recordId
+                ));
+        applyInvoiceTotals(invoice, recordId);
+        invoiceRepository.save(invoice);
     }
 
     public Invoice getInvoiceByRecordId(Integer recordId) {
@@ -62,5 +69,21 @@ public class InvoiceService {
 
     public List<Invoice> getInvoicesForDoctor(Integer doctorId) {
         return invoiceRepository.findByMedicalRecordDoctorIdOrderByCreatedAtDesc(doctorId);
+    }
+
+    private void applyInvoiceTotals(Invoice invoice, Integer recordId) {
+        double medicineFee = prescriptionRepository.findByMedicalRecordId(recordId)
+                .stream()
+                .mapToDouble(detail -> detail.getQuantity() * detail.getMedicine().getPrice())
+                .sum();
+
+        double serviceFee = serviceDetailRepository.findByMedicalRecordId(recordId)
+                .stream()
+                .mapToDouble(detail -> detail.getQuantity() * detail.getMedicalService().getPrice())
+                .sum();
+
+        invoice.setMedicineFee(medicineFee);
+        invoice.setServiceFee(serviceFee);
+        invoice.setTotalAmount(medicineFee + serviceFee);
     }
 }
