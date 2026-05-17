@@ -51,8 +51,57 @@ public class PatientService {
                 ));
     }
 
+    public Account findLinkedAccountByEmail(String email) {
+        String normalizedEmail = normalizeEmail(email);
+        if (normalizedEmail == null) {
+            return null;
+        }
+
+        long count = patientRepository.countByEmailIgnoreCase(normalizedEmail);
+        if (count > 1) {
+            throw new BusinessException(
+                    HttpStatus.CONFLICT,
+                    "Email duoc lien ket voi nhieu ho so benh nhan. Khong the tu dong lien ket tai khoan."
+            );
+        }
+
+        return patientRepository.findFirstByEmailIgnoreCase(normalizedEmail)
+                .map(Patient::getAccount)
+                .orElse(null);
+    }
+
+    public Account findLinkedAccountByPhone(String phone) {
+        String normalizedPhone = normalizeText(phone);
+        if (normalizedPhone == null) {
+            return null;
+        }
+        if (!normalizedPhone.matches("^(0|\\+84)\\d{9,10}$")) {
+            return null;
+        }
+
+        Account linkedByExactPhone = patientRepository.findFirstByPhone(normalizedPhone)
+                .map(Patient::getAccount)
+                .orElse(null);
+        if (linkedByExactPhone != null) {
+            return linkedByExactPhone;
+        }
+
+        String alternatePhone = toAlternatePhoneFormat(normalizedPhone);
+        if (alternatePhone == null) {
+            return null;
+        }
+        return patientRepository.findFirstByPhone(alternatePhone)
+                .map(Patient::getAccount)
+                .orElse(null);
+    }
+
     public boolean isProfileCompletedByUsername(String username) {
-        return getPatientByAccountUsername(username).getProfileCompleted();
+        Patient patient = getPatientByAccountUsername(username);
+        return Boolean.TRUE.equals(patient.getProfileCompleted());
+    }
+
+    public String getDisplayNameByUsername(String username) {
+        return getPatientByAccountUsername(username).getFullName();
     }
 
     public void ensureProfileCompleted(Integer patientId) {
@@ -92,11 +141,21 @@ public class PatientService {
 
     @Transactional
     public Patient createInitialProfileForAccount(Account account) {
-        return createInitialProfileForAccount(account, null);
+        return createInitialProfileForAccount(account, null, null, null);
     }
 
     @Transactional
     public Patient createInitialProfileForAccount(Account account, String preferredFullName) {
+        return createInitialProfileForAccount(account, preferredFullName, null, null);
+    }
+
+    @Transactional
+    public Patient createInitialProfileForAccount(
+            Account account,
+            String preferredFullName,
+            String preferredPhone,
+            String preferredEmail
+    ) {
         if (account == null || account.getId() == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the khoi tao ho so benh nhan khi chua co account.");
         }
@@ -104,10 +163,13 @@ public class PatientService {
         return patientRepository.findByAccount_Username(account.getUsername())
                 .orElseGet(() -> {
                     Patient patient = new Patient();
+                    String resolvedEmail = resolveBootstrapEmail(preferredEmail, account.getUsername());
+                    String resolvedPhone = resolveBootstrapPhone(preferredPhone, account.getUsername());
+                    ensureBootstrapIdentifiersAvailable(resolvedEmail, resolvedPhone);
                     patient.setAccount(account);
                     patient.setFullName(buildDefaultFullName(preferredFullName, account.getUsername()));
-                    patient.setEmail(resolveEmail(account.getUsername()));
-                    patient.setPhone(isPhoneNumber(account.getUsername()) ? account.getUsername() : null);
+                    patient.setEmail(resolvedEmail);
+                    patient.setPhone(resolvedPhone);
                     patient.setGender(null);
                     patient.setNationalId(null);
                     patient.setDateOfBirth(null);
@@ -157,6 +219,9 @@ public class PatientService {
 
         if (phone != null && patientRepository.existsByPhoneAndIdNot(phone, currentPatientId == null ? -1 : currentPatientId)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "So dien thoai da duoc su dung.");
+        }
+        if (email != null && patientRepository.existsByEmailIgnoreCaseAndIdNot(email, currentPatientId == null ? -1 : currentPatientId)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email da duoc su dung.");
         }
         if (nationalId != null && patientRepository.existsByNationalIdAndIdNot(nationalId, currentPatientId == null ? -1 : currentPatientId)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "CCCD da duoc su dung.");
@@ -270,5 +335,43 @@ public class PatientService {
     private boolean isPhoneNumber(String value) {
         String normalized = normalizeText(value);
         return normalized != null && normalized.matches("^(0|\\+84)\\d{9,10}$");
+    }
+
+    private String toAlternatePhoneFormat(String phone) {
+        if (phone == null) {
+            return null;
+        }
+        if (phone.startsWith("+84") && phone.length() > 3) {
+            return "0" + phone.substring(3);
+        }
+        if (phone.startsWith("0") && phone.length() > 1) {
+            return "+84" + phone.substring(1);
+        }
+        return null;
+    }
+
+    private String resolveBootstrapPhone(String preferredPhone, String username) {
+        String normalizedPreferred = normalizeText(preferredPhone);
+        if (normalizedPreferred != null) {
+            return normalizePhone(normalizedPreferred);
+        }
+        return isPhoneNumber(username) ? username : null;
+    }
+
+    private String resolveBootstrapEmail(String preferredEmail, String username) {
+        String normalizedPreferred = normalizeText(preferredEmail);
+        if (normalizedPreferred != null) {
+            return normalizeEmail(normalizedPreferred);
+        }
+        return resolveEmail(username);
+    }
+
+    private void ensureBootstrapIdentifiersAvailable(String email, String phone) {
+        if (email != null && patientRepository.existsByEmailIgnoreCaseAndIdNot(email, -1)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email da duoc su dung.");
+        }
+        if (phone != null && patientRepository.existsByPhoneAndIdNot(phone, -1)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "So dien thoai da duoc su dung.");
+        }
     }
 }

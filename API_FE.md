@@ -74,6 +74,7 @@
   "accessToken": "jwt_token_here",
   "tokenType": "Bearer ",
   "username": "patient01@gmail.com",
+  "displayName": "Nguyen Van A",
   "role": "ROLE_PATIENT",
   "profileCompleted": false
 }
@@ -91,6 +92,7 @@
 ```json
 {
   "username": "patient01@gmail.com",
+  "displayName": "Nguyen Van A",
   "role": "ROLE_PATIENT",
   "profileCompleted": true
 }

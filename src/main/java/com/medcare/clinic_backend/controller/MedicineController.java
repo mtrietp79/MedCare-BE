@@ -7,7 +7,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.List;
 
-@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/medicines")
 public class MedicineController {

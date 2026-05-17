@@ -4,6 +4,7 @@ public class AuthResponse {
     private String accessToken;
     private String tokenType = "Bearer ";
     private String username;
+    private String displayName;
     private String role;
     private Boolean profileCompleted;
 
@@ -11,15 +12,17 @@ public class AuthResponse {
         this.accessToken = accessToken;
     }
 
-    public AuthResponse(String accessToken, String username, String role) {
+    public AuthResponse(String accessToken, String username, String displayName, String role) {
         this.accessToken = accessToken;
         this.username = username;
+        this.displayName = displayName;
         this.role = role;
     }
 
-    public AuthResponse(String accessToken, String username, String role, Boolean profileCompleted) {
+    public AuthResponse(String accessToken, String username, String displayName, String role, Boolean profileCompleted) {
         this.accessToken = accessToken;
         this.username = username;
+        this.displayName = displayName;
         this.role = role;
         this.profileCompleted = profileCompleted;
     }
@@ -46,6 +49,14 @@ public class AuthResponse {
 
     public void setUsername(String username) {
         this.username = username;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
     }
 
     public String getRole() {

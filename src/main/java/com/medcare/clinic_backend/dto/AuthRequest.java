@@ -1,7 +1,17 @@
 package com.medcare.clinic_backend.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 public class AuthRequest {
+    @JsonAlias({"identifier", "login", "userName"})
     private String username;
+    @JsonAlias({"full_name", "name"})
+    private String fullName;
+    @JsonAlias({"mail"})
+    private String email;
+    @JsonAlias({"phoneNumber", "phone_number", "mobile"})
+    private String phone;
+    @JsonAlias({"pass"})
     private String password;
     private String role; // Chỉ dùng khi đăng ký (VD: ROLE_PATIENT, ROLE_DOCTOR)
 
@@ -12,6 +22,30 @@ public class AuthRequest {
 
     public void setUsername(String username) {
         this.username = username;
+    }
+
+    public String getFullName() {
+        return fullName;
+    }
+
+    public void setFullName(String fullName) {
+        this.fullName = fullName;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
     }
 
     public String getPassword() {

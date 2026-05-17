@@ -11,6 +11,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Service
@@ -42,11 +43,17 @@ public class DoctorService {
                 ));
     }
 
+    public String getDisplayNameByUsername(String username) {
+        return getDoctorByAccountUsername(username).getFullName();
+    }
+
     @Transactional
     public Doctor createDoctor(Doctor doctor) {
         validateDoctorInput(doctor);
         Account resolvedAccount = resolveAccountForCreate(doctor.getAccount());
         doctor.setAccount(resolvedAccount);
+        doctor.setRating(resolveRatingForCreate(doctor.getRating()));
+        doctor.setExperienceYears(resolveExperienceYearsForCreate(doctor.getExperienceYears()));
         return doctorRepository.save(doctor);
     }
 
@@ -61,6 +68,11 @@ public class DoctorService {
         doctor.setEmail(doctorDetails.getEmail());
         doctor.setPhone(doctorDetails.getPhone());
         doctor.setPrice(doctorDetails.getPrice());
+        doctor.setRating(resolveRatingForUpdate(doctorDetails.getRating(), doctor.getRating()));
+        doctor.setExperienceYears(resolveExperienceYearsForUpdate(
+                doctorDetails.getExperienceYears(),
+                doctor.getExperienceYears()
+        ));
         doctor.setSpecialty(doctorDetails.getSpecialty());
         doctor.setAccount(resolveAccountForUpdate(doctorDetails.getAccount(), doctor.getAccount()));
         return doctorRepository.save(doctor);
@@ -83,9 +95,48 @@ public class DoctorService {
         if (doctor.getEmail() == null || doctor.getEmail().isBlank()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Email bac si khong duoc de trong.");
         }
+        BigDecimal price = doctor.getPrice();
+        if (price != null && price.signum() < 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Gia kham khong duoc am.");
+        }
+        Double rating = doctor.getRating();
+        if (rating != null) {
+            if (!Double.isFinite(rating)) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "Danh gia bac si khong hop le.");
+            }
+            if (rating < 0 || rating > 5) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "Danh gia bac si phai nam trong khoang 0 den 5.");
+            }
+        }
+        Integer experienceYears = doctor.getExperienceYears();
+        if (experienceYears != null && experienceYears < 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "So nam kinh nghiem khong duoc am.");
+        }
         if (doctor.getSpecialty() == null || doctor.getSpecialty().getId() == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si phai thuoc mot chuyen khoa.");
         }
+    }
+
+    private Double resolveRatingForCreate(Double requestedRating) {
+        return requestedRating == null ? 0.0 : requestedRating;
+    }
+
+    private Integer resolveExperienceYearsForCreate(Integer requestedExperienceYears) {
+        return requestedExperienceYears == null ? 0 : requestedExperienceYears;
+    }
+
+    private Double resolveRatingForUpdate(Double requestedRating, Double currentRating) {
+        if (requestedRating != null) {
+            return requestedRating;
+        }
+        return currentRating == null ? 0.0 : currentRating;
+    }
+
+    private Integer resolveExperienceYearsForUpdate(Integer requestedExperienceYears, Integer currentExperienceYears) {
+        if (requestedExperienceYears != null) {
+            return requestedExperienceYears;
+        }
+        return currentExperienceYears == null ? 0 : currentExperienceYears;
     }
 
     private Account resolveAccountForCreate(Account inputAccount) {

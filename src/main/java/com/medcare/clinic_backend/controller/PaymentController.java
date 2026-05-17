@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 
-@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/payment")
 public class PaymentController {

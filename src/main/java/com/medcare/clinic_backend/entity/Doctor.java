@@ -2,15 +2,12 @@ package com.medcare.clinic_backend.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
-import com.medcare.clinic_backend.entity.Account;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.OneToOne;
 
 import java.math.BigDecimal;
 
 @Data
 @Entity
-@Table(name = "doctors") // Ánh xạ đúng với tên bảng bạn đã tạo trong pgAdmin
+@Table(name = "doctors")
 public class Doctor {
 
     @Id
@@ -20,16 +17,21 @@ public class Doctor {
     @Column(name = "full_name", nullable = false, length = 100)
     private String fullName;
 
-    @Column(nullable = false, length = 100, unique = true)
+    @Column(name = "email", nullable = false, length = 100, unique = true)
     private String email;
 
-    @Column(length = 15)
+    @Column(name = "phone", length = 15)
     private String phone;
 
-    @Column(precision = 10, scale = 2)
+    @Column(name = "price", precision = 10, scale = 2)
     private BigDecimal price;
 
-    // ĐÂY LÀ PHẦN QUAN TRỌNG NHẤT: Mối quan hệ Khóa Ngoại
+    @Column(name = "rating")
+    private Double rating = 0.0;
+
+    @Column(name = "experience_years")
+    private Integer experienceYears = 0;
+
     @ManyToOne
     @JoinColumn(name = "specialty_id", nullable = false)
     private Specialty specialty;
@@ -37,8 +39,4 @@ public class Doctor {
     @OneToOne
     @JoinColumn(name = "account_id", referencedColumnName = "id")
     private Account account;
-
-    // Nhớ Generate Getter và Setter cho 'account' ở dưới cùng nhé:
-    public Account getAccount() { return account; }
-    public void setAccount(Account account) { this.account = account; }
 }
