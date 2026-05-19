@@ -22,4 +22,10 @@ public class Specialty {
 
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    @Transient
+    private Long totalDoctors;
+
+    @Transient
+    private Long doctorCount;
 }

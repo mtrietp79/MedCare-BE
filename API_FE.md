@@ -98,30 +98,6 @@
 }
 ```
 
-### `POST /api/auth/google`
-
-- Body:
-
-```json
-{
-  "token": "google_id_token"
-}
-```
-
-- Success response shape is the same as `/api/auth/login`.
-
-### `POST /api/auth/facebook`
-
-- Body:
-
-```json
-{
-  "token": "facebook_access_token"
-}
-```
-
-- Success response shape is the same as `/api/auth/login`.
-
 ### `POST /api/auth/forgot-password`
 
 - Purpose: send OTP only when user wants to reset password.
@@ -405,6 +381,13 @@
 ### `GET /api/doctors`
 
 - Role: `ROLE_ADMIN` / `ROLE_DOCTOR` / `ROLE_PATIENT`
+- Query optional: `specialtyId`
+- Response bo sung cac truong de FE filter an toan:
+  - `fullName`, `name`
+  - `email`, `phone`
+  - `specialtyName`, `specialization`
+  - `username`
+  - van giu object `specialty` va `account`
 
 ### `GET /api/doctors/{id}`
 

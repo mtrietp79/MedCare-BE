@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.controller;
 
+import com.medcare.clinic_backend.dto.BookingRulesDto;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
@@ -9,7 +10,6 @@ import com.medcare.clinic_backend.repository.DoctorRepository;
 import com.medcare.clinic_backend.repository.PatientRepository;
 import com.medcare.clinic_backend.service.AppointmentService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,6 +18,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 @RestController
@@ -50,6 +52,12 @@ public class AppointmentController {
         return appointmentService.getAllAppointments();
     }
 
+    @GetMapping("/booking-rules")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
+    public BookingRulesDto getBookingRules() {
+        return appointmentService.getBookingRules();
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_DOCTOR', 'ROLE_PATIENT')")
     public Appointment getById(@PathVariable Integer id) {
@@ -71,8 +79,9 @@ public class AppointmentController {
     @PreAuthorize("hasAnyAuthority('ROLE_DOCTOR', 'ROLE_PATIENT')")
     public List<SlotAvailabilityDto> getDoctorSlotStatus(
             @PathVariable Integer doctorId,
-            @RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
+            @RequestParam("date") String rawDate
     ) {
+        LocalDate date = parseDateQuery(rawDate);
         return appointmentService.getDoctorSlotStatus(doctorId, date);
     }
 
@@ -163,5 +172,30 @@ public class AppointmentController {
                         HttpStatus.BAD_REQUEST,
                         "Tai khoan doctor chua duoc lien ket voi ho so bac si."
                 ));
+    }
+
+    private LocalDate parseDateQuery(String rawDate) {
+        if (rawDate == null || rawDate.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu tham so 'date'.");
+        }
+
+        String normalized = rawDate.trim();
+        List<DateTimeFormatter> acceptedFormatters = List.of(
+                DateTimeFormatter.ISO_LOCAL_DATE,
+                DateTimeFormatter.ofPattern("dd/MM/yyyy")
+        );
+
+        for (DateTimeFormatter formatter : acceptedFormatters) {
+            try {
+                return LocalDate.parse(normalized, formatter);
+            } catch (DateTimeParseException ignored) {
+                // Try next formatter.
+            }
+        }
+
+        throw new BusinessException(
+                HttpStatus.BAD_REQUEST,
+                "Ngay khong hop le. Dinh dang ho tro: YYYY-MM-DD hoac DD/MM/YYYY."
+        );
     }
 }

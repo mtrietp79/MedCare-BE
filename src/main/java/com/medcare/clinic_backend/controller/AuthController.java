@@ -4,16 +4,12 @@ import com.medcare.clinic_backend.dto.AuthRequest;
 import com.medcare.clinic_backend.dto.AuthResponse;
 import com.medcare.clinic_backend.dto.ForgotPasswordRequest;
 import com.medcare.clinic_backend.dto.ResetPasswordRequest;
-import com.medcare.clinic_backend.dto.SocialCodeLoginRequest;
-import com.medcare.clinic_backend.dto.SocialLoginRequest;
 import com.medcare.clinic_backend.entity.Account;
-import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.security.JwtTokenProvider;
 import com.medcare.clinic_backend.service.AuthService;
 import com.medcare.clinic_backend.service.DoctorService;
 import com.medcare.clinic_backend.service.PatientService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -96,70 +92,6 @@ public class AuthController {
                 role,
                 resolveProfileCompleted(role, username)
         ));
-    }
-
-    @PostMapping("/google")
-    public ResponseEntity<?> googleLogin(@RequestBody SocialLoginRequest request) {
-        try {
-            String username = authService.loginWithGoogle(request.getToken());
-            return ResponseEntity.ok(buildAuthResponse(username));
-        } catch (BusinessException e) {
-            return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("message", "Da xay ra loi he thong. Vui long thu lai sau."));
-        }
-    }
-
-    @GetMapping("/google/url")
-    public ResponseEntity<?> googleAuthUrl(@RequestParam(required = false) String state,
-                                           @RequestParam(required = false) String redirectUri) {
-        return ResponseEntity.ok(Map.of("url", authService.buildGoogleAuthorizationUrl(state, redirectUri)));
-    }
-
-    @PostMapping("/google/code")
-    public ResponseEntity<?> googleCodeLogin(@RequestBody SocialCodeLoginRequest request) {
-        try {
-            String username = authService.loginWithGoogleAuthCode(request.getCode(), request.getRedirectUri());
-            return ResponseEntity.ok(buildAuthResponse(username));
-        } catch (BusinessException e) {
-            return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("message", "Da xay ra loi he thong. Vui long thu lai sau."));
-        }
-    }
-
-    @PostMapping("/facebook")
-    public ResponseEntity<?> facebookLogin(@RequestBody SocialLoginRequest request) {
-        try {
-            String username = authService.loginWithFacebook(request.getToken());
-            return ResponseEntity.ok(buildAuthResponse(username));
-        } catch (BusinessException e) {
-            return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("message", "Da xay ra loi he thong. Vui long thu lai sau."));
-        }
-    }
-
-    @GetMapping("/facebook/url")
-    public ResponseEntity<?> facebookAuthUrl(@RequestParam(required = false) String state,
-                                             @RequestParam(required = false) String redirectUri) {
-        return ResponseEntity.ok(Map.of("url", authService.buildFacebookAuthorizationUrl(state, redirectUri)));
-    }
-
-    @PostMapping("/facebook/code")
-    public ResponseEntity<?> facebookCodeLogin(@RequestBody SocialCodeLoginRequest request) {
-        try {
-            String username = authService.loginWithFacebookAuthCode(request.getCode(), request.getRedirectUri());
-            return ResponseEntity.ok(buildAuthResponse(username));
-        } catch (BusinessException e) {
-            return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("message", "Da xay ra loi he thong. Vui long thu lai sau."));
-        }
     }
 
     @GetMapping("/me")

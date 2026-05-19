@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -18,6 +19,12 @@ public interface DoctorRepository extends JpaRepository<Doctor, Integer> {
     Optional<Doctor> findByIdForUpdate(@Param("id") Integer id);
 
     Optional<Doctor> findByAccount_Username(String username);
+
+    List<Doctor> findBySpecialty_Id(Integer specialtyId);
+
+    long countBySpecialty_Id(Integer specialtyId);
+
+    List<Doctor> findByFullNameContainingIgnoreCaseOrSpecialty_NameContainingIgnoreCase(String fullNameKeyword, String specialtyKeyword);
 
     boolean existsByAccountId(Integer accountId);
 }

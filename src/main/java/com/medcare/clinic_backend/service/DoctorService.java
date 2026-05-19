@@ -2,6 +2,7 @@ package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.entity.Account;
 import com.medcare.clinic_backend.entity.Doctor;
+import com.medcare.clinic_backend.dto.DoctorResponse;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AccountRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
@@ -27,12 +28,32 @@ public class DoctorService {
     private PasswordEncoder passwordEncoder;
 
     public List<Doctor> getAllDoctors() {
-        return doctorRepository.findAll();
+        return getAllDoctors(null);
+    }
+
+    public List<Doctor> getAllDoctors(Integer specialtyId) {
+        if (specialtyId == null) {
+            return doctorRepository.findAll();
+        }
+        if (specialtyId <= 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "specialtyId phai la so duong.");
+        }
+        return doctorRepository.findBySpecialty_Id(specialtyId);
+    }
+
+    public List<DoctorResponse> getAllDoctorResponses(Integer specialtyId) {
+        return getAllDoctors(specialtyId).stream()
+                .map(this::toDoctorResponse)
+                .toList();
     }
 
     public Doctor getDoctorById(Integer id) {
         return doctorRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + id));
+    }
+
+    public DoctorResponse getDoctorResponseById(Integer id) {
+        return toDoctorResponse(getDoctorById(id));
     }
 
     public Doctor getDoctorByAccountUsername(String username) {
@@ -41,6 +62,10 @@ public class DoctorService {
                         HttpStatus.BAD_REQUEST,
                         "Tai khoan doctor chua duoc lien ket voi ho so bac si."
                 ));
+    }
+
+    public DoctorResponse getDoctorResponseByAccountUsername(String username) {
+        return toDoctorResponse(getDoctorByAccountUsername(username));
     }
 
     public String getDisplayNameByUsername(String username) {
@@ -55,6 +80,64 @@ public class DoctorService {
         doctor.setRating(resolveRatingForCreate(doctor.getRating()));
         doctor.setExperienceYears(resolveExperienceYearsForCreate(doctor.getExperienceYears()));
         return doctorRepository.save(doctor);
+    }
+
+    public DoctorResponse toDoctorResponse(Doctor doctor) {
+        if (doctor == null) {
+            return null;
+        }
+
+        DoctorResponse response = new DoctorResponse();
+        response.setId(doctor.getId());
+
+        String safeFullName = safeText(doctor.getFullName());
+        response.setFullName(safeFullName);
+        response.setName(safeFullName);
+        response.setEmail(safeText(doctor.getEmail()));
+        response.setPhone(safeText(doctor.getPhone()));
+        response.setPrice(doctor.getPrice());
+        response.setRating(doctor.getRating() == null ? 0.0 : doctor.getRating());
+        int normalizedExperienceYears = doctor.getExperienceYears() == null ? 0 : doctor.getExperienceYears();
+        response.setExperienceYears(normalizedExperienceYears);
+        response.setExperience(normalizedExperienceYears);
+
+        DoctorResponse.SpecialtySummary specialtySummary = new DoctorResponse.SpecialtySummary();
+        if (doctor.getSpecialty() != null) {
+            specialtySummary.setId(doctor.getSpecialty().getId());
+            specialtySummary.setName(safeText(doctor.getSpecialty().getName()));
+            specialtySummary.setDescription(safeText(doctor.getSpecialty().getDescription()));
+            specialtySummary.setCreatedAt(doctor.getSpecialty().getCreatedAt());
+            response.setSpecialtyId(doctor.getSpecialty().getId());
+            response.setSpecialtyName(safeText(doctor.getSpecialty().getName()));
+            response.setSpecialization(safeText(doctor.getSpecialty().getName()));
+        } else {
+            specialtySummary.setId(null);
+            specialtySummary.setName("");
+            specialtySummary.setDescription("");
+            specialtySummary.setCreatedAt(null);
+            response.setSpecialtyId(null);
+            response.setSpecialtyName("");
+            response.setSpecialization("");
+        }
+        response.setSpecialty(specialtySummary);
+
+        DoctorResponse.AccountSummary accountSummary = new DoctorResponse.AccountSummary();
+        if (doctor.getAccount() != null) {
+            accountSummary.setId(doctor.getAccount().getId());
+            accountSummary.setUsername(safeText(doctor.getAccount().getUsername()));
+            accountSummary.setRole(safeText(doctor.getAccount().getRole()));
+            response.setAccountId(doctor.getAccount().getId());
+            response.setUsername(safeText(doctor.getAccount().getUsername()));
+        } else {
+            accountSummary.setId(null);
+            accountSummary.setUsername("");
+            accountSummary.setRole("");
+            response.setAccountId(null);
+            response.setUsername("");
+        }
+        response.setAccount(accountSummary);
+
+        return response;
     }
 
     @Transactional
@@ -227,5 +310,9 @@ public class DoctorService {
         }
         String normalized = value.trim();
         return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value;
     }
 }

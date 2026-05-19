@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.persistence.*;
 import lombok.Data;
 
@@ -30,6 +31,7 @@ public class Doctor {
     private Double rating = 0.0;
 
     @Column(name = "experience_years")
+    @JsonAlias({"experience", "yearsExperience", "years_of_experience", "experience_years"})
     private Integer experienceYears = 0;
 
     @ManyToOne

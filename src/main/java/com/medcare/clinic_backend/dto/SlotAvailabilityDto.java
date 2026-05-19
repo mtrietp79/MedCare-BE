@@ -9,6 +9,7 @@ public record SlotAvailabilityDto(
         int maxPatients,
         long bookedPatients,
         boolean full,
-        boolean disabled
+        boolean disabled,
+        String disabledReason
 ) {
 }

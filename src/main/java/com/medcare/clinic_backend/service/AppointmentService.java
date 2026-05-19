@@ -1,14 +1,13 @@
 package com.medcare.clinic_backend.service;
 
+import com.medcare.clinic_backend.dto.BookingRulesDto;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
-import com.medcare.clinic_backend.entity.DoctorSchedule;
 import com.medcare.clinic_backend.entity.Specialty;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
-import com.medcare.clinic_backend.repository.DoctorScheduleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,9 +33,6 @@ public class AppointmentService {
     private AppointmentRepository appointmentRepository;
 
     @Autowired
-    private DoctorScheduleRepository scheduleRepository;
-
-    @Autowired
     private DoctorRepository doctorRepository;
 
     @Autowired
@@ -55,6 +51,12 @@ public class AppointmentService {
 
     public List<Appointment> getAppointmentsForDoctor(Integer doctorId) {
         return appointmentRepository.findByDoctorIdOrderByAppointmentDateDesc(doctorId);
+    }
+
+    public BookingRulesDto getBookingRules() {
+        LocalDateTime serverNow = LocalDateTime.now().withSecond(0).withNano(0);
+        LocalDateTime minBookableAt = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
+        return new BookingRulesDto(serverNow, minBookableAt);
     }
 
     public Appointment getAppointmentById(Integer id) {
@@ -122,17 +124,15 @@ public class AppointmentService {
         }
 
         Doctor doctor = fetchDoctor(doctorId);
-        List<DoctorSchedule> schedules = scheduleRepository.findByDoctorIdAndWorkDate(doctor.getId(), date);
         List<SlotAvailabilityDto> result = new ArrayList<>();
+        LocalDateTime serverNow = LocalDateTime.now();
+        LocalDateTime minAllowedStart = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
 
         for (SlotRule slotRule : buildDailySlotRules(date)) {
-            boolean onShift = schedules.stream().anyMatch(schedule -> isScheduleMatchingShift(schedule, slotRule.shift()));
-            long bookedPatients = onShift
-                    ? appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end())
-                    : 0L;
-            boolean full = onShift && bookedPatients >= slotRule.maxPatients();
-            boolean blockedByTime = !isSlotAllowedByCurrentTime(slotRule.start());
-            boolean disabled = blockedByTime || !onShift || full;
+            long bookedPatients = appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end());
+            boolean full = bookedPatients >= slotRule.maxPatients();
+            String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart);
+            boolean disabled = disabledReason != null;
 
             result.add(new SlotAvailabilityDto(
                     slotRule.start(),
@@ -141,7 +141,8 @@ public class AppointmentService {
                     slotRule.maxPatients(),
                     bookedPatients,
                     full,
-                    disabled
+                    disabled,
+                    disabledReason
             ));
         }
 
@@ -216,11 +217,7 @@ public class AppointmentService {
     }
 
     private Doctor findAvailableDoctorForSpecialty(Integer specialtyId, SlotRule slotRule) {
-        List<Integer> candidateDoctorIds = scheduleRepository.findByWorkDate(slotRule.date()).stream()
-                .filter(schedule -> isScheduleMatchingShift(schedule, slotRule.shift()))
-                .map(DoctorSchedule::getDoctor)
-                .filter(doctor -> doctor != null && doctor.getSpecialty() != null)
-                .filter(doctor -> doctor.getSpecialty().getId().equals(specialtyId))
+        List<Integer> candidateDoctorIds = doctorRepository.findBySpecialty_Id(specialtyId).stream()
                 .map(Doctor::getId)
                 .filter(id -> id != null)
                 .distinct()
@@ -299,13 +296,6 @@ public class AppointmentService {
     }
 
     private void validateDoctorAvailability(Doctor doctor, SlotRule slotRule, Integer excludedAppointmentId) {
-        List<DoctorSchedule> schedules = scheduleRepository.findByDoctorIdAndWorkDate(doctor.getId(), slotRule.date());
-        boolean availableInShift = schedules.stream().anyMatch(schedule -> isScheduleMatchingShift(schedule, slotRule.shift()));
-
-        if (!availableInShift) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si khong co lich truc trong ca ban chon.");
-        }
-
         long count = excludedAppointmentId == null
                 ? appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end())
                 : appointmentRepository.countByDoctorInSlotExcludingAppointment(doctor.getId(), slotRule.start(), slotRule.end(), excludedAppointmentId);
@@ -349,9 +339,22 @@ public class AppointmentService {
         }
     }
 
-    private boolean isSlotAllowedByCurrentTime(LocalDateTime slotStart) {
-        LocalDateTime minAllowedStart = LocalDateTime.now().plusHours(MIN_BOOKING_LEAD_HOURS);
-        return !slotStart.isBefore(minAllowedStart);
+    private String resolveDisabledReason(
+            LocalDateTime slotStart,
+            boolean full,
+            LocalDateTime serverNow,
+            LocalDateTime minAllowedStart
+    ) {
+        if (slotStart.isBefore(serverNow)) {
+            return "PAST";
+        }
+        if (slotStart.isBefore(minAllowedStart)) {
+            return "LESS_THAN_2H";
+        }
+        if (full) {
+            return "FULL";
+        }
+        return null;
     }
 
     private void ensureSpecialtyForDoctor(Appointment appointment, Doctor doctor) {
@@ -427,25 +430,6 @@ public class AppointmentService {
         if (!ALLOWED_STATUSES.contains(normalizedStatus)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Trang thai lich hen khong hop le.");
         }
-    }
-
-    private boolean isScheduleMatchingShift(DoctorSchedule schedule, String requiredShift) {
-        if (schedule == null || schedule.getShift() == null) {
-            return false;
-        }
-
-        String shift = schedule.getShift().trim().toUpperCase();
-        String normalizedRequiredShift = requiredShift.trim().toUpperCase();
-
-        if ("ALL_DAY".equals(shift)) {
-            return true;
-        }
-
-        if ("AFTERNOON".equals(normalizedRequiredShift) && "EVENING".equals(shift)) {
-            return true;
-        }
-
-        return shift.equals(normalizedRequiredShift);
     }
 
     private SlotRule resolveSlotRule(LocalDateTime appointmentDate) {

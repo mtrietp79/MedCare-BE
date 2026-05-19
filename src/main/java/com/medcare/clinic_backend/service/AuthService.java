@@ -1,35 +1,18 @@
 package com.medcare.clinic_backend.service;
 
-import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
-import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
-import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.gson.GsonFactory;
 import com.medcare.clinic_backend.entity.Account;
-import com.medcare.clinic_backend.entity.SocialIdentity;
 import com.medcare.clinic_backend.repository.AccountRepository;
-import com.medcare.clinic_backend.repository.SocialIdentityRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.util.UriComponentsBuilder;
 import com.medcare.clinic_backend.exception.BusinessException;
 
 import java.time.LocalDateTime;
-import java.util.Collections;
 import java.util.Map;
 import java.security.SecureRandom;
 import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Service
@@ -50,28 +33,7 @@ public class AuthService {
     private PatientService patientService;
 
     @Autowired
-    private SocialIdentityRepository socialIdentityRepository;
-
-    @Autowired
     private OtpDeliveryService otpDeliveryService;
-
-    @Value("${auth.google.client-id:}")
-    private String googleClientId;
-
-    @Value("${auth.google.client-secret:}")
-    private String googleClientSecret;
-
-    @Value("${auth.google.redirect-uri:}")
-    private String googleRedirectUri;
-
-    @Value("${auth.facebook.app-id:}")
-    private String facebookAppId;
-
-    @Value("${auth.facebook.app-secret:}")
-    private String facebookAppSecret;
-
-    @Value("${auth.facebook.redirect-uri:}")
-    private String facebookRedirectUri;
 
     @Transactional
     public String register(Account account) {
@@ -216,225 +178,6 @@ public class AuthService {
         accountRepository.save(account);
     }
 
-    public String loginWithGoogle(String idTokenString) throws Exception {
-        if (googleClientId == null || googleClientId.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Google Client ID.");
-        }
-        if (idTokenString == null || idTokenString.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu Google ID token.");
-        }
-
-        GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
-                .setAudience(Collections.singletonList(googleClientId))
-                .build();
-
-        GoogleIdToken idToken = verifier.verify(idTokenString);
-        if (idToken == null) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "Token Google khong hop le.");
-        }
-        return findOrCreateSocialAccount("GOOGLE", idToken.getPayload().getSubject(), idToken.getPayload().getEmail());
-    }
-
-    public String buildGoogleAuthorizationUrl(String state, String redirectUriOverride) {
-        String redirectUri = firstNonBlank(redirectUriOverride, googleRedirectUri);
-        if (googleClientId == null || googleClientId.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Google Client ID.");
-        }
-        if (redirectUri == null || redirectUri.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Google redirect URI.");
-        }
-
-        UriComponentsBuilder builder = UriComponentsBuilder
-                .fromUriString("https://accounts.google.com/o/oauth2/v2/auth")
-                .queryParam("client_id", googleClientId)
-                .queryParam("redirect_uri", redirectUri)
-                .queryParam("response_type", "code")
-                .queryParam("scope", "openid email profile")
-                .queryParam("access_type", "offline")
-                .queryParam("prompt", "consent");
-        if (state != null && !state.isBlank()) {
-            builder.queryParam("state", state);
-        }
-        return builder.encode().build().toUriString();
-    }
-
-    public String loginWithGoogleAuthCode(String code, String redirectUriOverride) throws Exception {
-        String normalizedCode = normalizeText(code);
-        String redirectUri = firstNonBlank(redirectUriOverride, googleRedirectUri);
-
-        if (normalizedCode == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu authorization code tu Google.");
-        }
-        if (googleClientId == null || googleClientId.isBlank() || googleClientSecret == null || googleClientSecret.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Google Client ID/Secret.");
-        }
-        if (redirectUri == null || redirectUri.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Google redirect URI.");
-        }
-
-        RestTemplate restTemplate = new RestTemplate();
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
-
-        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-        form.add("code", normalizedCode);
-        form.add("client_id", googleClientId);
-        form.add("client_secret", googleClientSecret);
-        form.add("redirect_uri", redirectUri);
-        form.add("grant_type", "authorization_code");
-
-        HttpEntity<MultiValueMap<String, String>> requestEntity = new HttpEntity<>(form, headers);
-        ResponseEntity<Map> response = restTemplate.postForEntity("https://oauth2.googleapis.com/token", requestEntity, Map.class);
-        Map<String, Object> tokenResponse = response.getBody();
-        if (tokenResponse == null) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "Khong doi duoc token Google.");
-        }
-
-        String idToken = tokenResponse.get("id_token") == null ? null : tokenResponse.get("id_token").toString();
-        if (idToken == null || idToken.isBlank()) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "Google khong tra ve ID token.");
-        }
-        return loginWithGoogle(idToken);
-    }
-
-    public String loginWithFacebook(String accessToken) throws Exception {
-        String normalizedToken = normalizeText(accessToken);
-        if (normalizedToken == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu Facebook access token.");
-        }
-
-        String fbUrl = UriComponentsBuilder
-                .fromUriString("https://graph.facebook.com/v19.0/me")
-                .queryParam("fields", "id,name,email")
-                .queryParam("access_token", normalizedToken)
-                .build()
-                .encode()
-                .toUriString();
-        RestTemplate restTemplate = new RestTemplate();
-        try {
-            Map<String, Object> userData = restTemplate.getForEntity(fbUrl, Map.class).getBody();
-            if (userData == null || userData.get("email") == null) {
-                throw new BusinessException(
-                        HttpStatus.UNAUTHORIZED,
-                        "Khong lay duoc email tu Facebook. Hay cap quyen email va dung tai khoan co email."
-                );
-            }
-            return findOrCreateSocialAccount("FACEBOOK", stringify(userData.get("id")), (String) userData.get("email"));
-        } catch (BusinessException ex) {
-            throw ex;
-        } catch (Exception ex) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "Xac thuc Facebook that bai.");
-        }
-    }
-
-    public String buildFacebookAuthorizationUrl(String state, String redirectUriOverride) {
-        String redirectUri = firstNonBlank(redirectUriOverride, facebookRedirectUri);
-        if (facebookAppId == null || facebookAppId.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Facebook App ID.");
-        }
-        if (redirectUri == null || redirectUri.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Facebook redirect URI.");
-        }
-
-        UriComponentsBuilder builder = UriComponentsBuilder
-                .fromUriString("https://www.facebook.com/v19.0/dialog/oauth")
-                .queryParam("client_id", facebookAppId)
-                .queryParam("redirect_uri", redirectUri)
-                .queryParam("response_type", "code")
-                .queryParam("scope", "email,public_profile");
-        if (state != null && !state.isBlank()) {
-            builder.queryParam("state", state);
-        }
-        return builder.encode().build().toUriString();
-    }
-
-    public String loginWithFacebookAuthCode(String code, String redirectUriOverride) throws Exception {
-        String normalizedCode = normalizeText(code);
-        String redirectUri = firstNonBlank(redirectUriOverride, facebookRedirectUri);
-        if (normalizedCode == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu authorization code tu Facebook.");
-        }
-        if (facebookAppId == null || facebookAppId.isBlank() || facebookAppSecret == null || facebookAppSecret.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Facebook App ID/Secret.");
-        }
-        if (redirectUri == null || redirectUri.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "He thong chua cau hinh Facebook redirect URI.");
-        }
-
-        String exchangeUrl = UriComponentsBuilder
-                .fromUriString("https://graph.facebook.com/v19.0/oauth/access_token")
-                .queryParam("client_id", facebookAppId)
-                .queryParam("redirect_uri", redirectUri)
-                .queryParam("client_secret", facebookAppSecret)
-                .queryParam("code", normalizedCode)
-                .build()
-                .encode()
-                .toUriString();
-
-        RestTemplate restTemplate = new RestTemplate();
-        ResponseEntity<Map> response = restTemplate.getForEntity(exchangeUrl, Map.class);
-        Map<String, Object> tokenBody = response.getBody();
-        if (tokenBody == null || tokenBody.get("access_token") == null) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "Khong doi duoc access token Facebook.");
-        }
-        return loginWithFacebook(tokenBody.get("access_token").toString());
-    }
-
-    private String findOrCreateSocialAccount(String provider, String providerUserId, String email) {
-        String normalizedProvider = normalizeProvider(provider);
-        String normalizedProviderUserId = normalizeText(providerUserId);
-        String normalizedEmail = normalizeEmail(email);
-
-        if (normalizedProvider == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Provider social khong hop le.");
-        }
-        if (normalizedProviderUserId == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Tai khoan social khong co dinh danh hop le.");
-        }
-        if (normalizedEmail == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Tai khoan social khong co email hop le.");
-        }
-
-        SocialIdentity existingIdentity = socialIdentityRepository
-                .findByProviderAndProviderUserId(normalizedProvider, normalizedProviderUserId)
-                .orElse(null);
-        if (existingIdentity != null) {
-            ensureSocialIdentityUsesSameEmail(existingIdentity, normalizedEmail);
-            return existingIdentity.getAccount().getUsername();
-        }
-
-        Account resolvedAccount = resolveAccountForSocialEmail(normalizedEmail);
-        if (resolvedAccount == null) {
-            resolvedAccount = createAccount(
-                    normalizedEmail,
-                    generateRandomSocialPassword(),
-                    "ROLE_PATIENT",
-                    null,
-                    null,
-                    normalizedEmail,
-                    false
-            );
-        }
-
-        SocialIdentity identityByEmail = socialIdentityRepository
-                .findByProviderAndEmailIgnoreCase(normalizedProvider, normalizedEmail)
-                .orElse(null);
-        if (identityByEmail != null && !identityByEmail.getAccount().getId().equals(resolvedAccount.getId())) {
-            throw new BusinessException(
-                    HttpStatus.CONFLICT,
-                    "Email social da duoc lien ket voi mot tai khoan khac."
-            );
-        }
-
-        SocialIdentity socialIdentity = identityByEmail == null ? new SocialIdentity() : identityByEmail;
-        socialIdentity.setProvider(normalizedProvider);
-        socialIdentity.setProviderUserId(normalizedProviderUserId);
-        socialIdentity.setEmail(normalizedEmail);
-        socialIdentity.setAccount(resolvedAccount);
-        socialIdentityRepository.save(socialIdentity);
-        return resolvedAccount.getUsername();
-    }
-
     private Account createAccount(
             String username,
             String password,
@@ -453,29 +196,6 @@ public class AuthService {
             patientService.createInitialProfileForAccount(savedAccount, fullName, phone, email);
         }
         return savedAccount;
-    }
-
-    private void ensureSocialIdentityUsesSameEmail(SocialIdentity identity, String normalizedEmail) {
-        if (!identity.getEmail().equalsIgnoreCase(normalizedEmail)) {
-            throw new BusinessException(
-                    HttpStatus.CONFLICT,
-                    "Tai khoan social nay dang tra ve email khac voi email da lien ket truoc do."
-            );
-        }
-    }
-
-    private Account resolveAccountForSocialEmail(String normalizedEmail) {
-        Account accountByUsername = accountRepository.findByUsername(normalizedEmail).orElse(null);
-        Account accountByPatientEmail = patientService.findLinkedAccountByEmail(normalizedEmail);
-
-        if (accountByUsername != null && accountByPatientEmail != null
-                && !accountByUsername.getId().equals(accountByPatientEmail.getId())) {
-            throw new BusinessException(
-                    HttpStatus.CONFLICT,
-                    "Email nay dang tro toi hai tai khoan khac nhau. Khong the tu dong lien ket."
-            );
-        }
-        return accountByUsername != null ? accountByUsername : accountByPatientEmail;
     }
 
     private String resolveAccountUsernameForRecovery(String rawIdentifier) {
@@ -561,28 +281,7 @@ public class AuthService {
         return normalized.isEmpty() ? null : normalized;
     }
 
-    private String firstNonBlank(String first, String second) {
-        String normalizedFirst = normalizeText(first);
-        if (normalizedFirst != null) {
-            return normalizedFirst;
-        }
-        return normalizeText(second);
-    }
-
-    private String normalizeProvider(String provider) {
-        String normalized = normalizeText(provider);
-        return normalized == null ? null : normalized.toUpperCase();
-    }
-
-    private String stringify(Object value) {
-        return value == null ? null : value.toString();
-    }
-
     private String generateOtp() {
         return String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
-    }
-
-    private String generateRandomSocialPassword() {
-        return "SOCIAL-" + UUID.randomUUID();
     }
 }

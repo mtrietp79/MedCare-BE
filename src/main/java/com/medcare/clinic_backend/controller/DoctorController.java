@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.controller;
 
 import com.medcare.clinic_backend.entity.Doctor;
+import com.medcare.clinic_backend.dto.DoctorResponse;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.service.DoctorService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,36 +22,36 @@ public class DoctorController {
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
-    public List<Doctor> getAll() {
-        return doctorService.getAllDoctors();
+    public List<DoctorResponse> getAll(@RequestParam(required = false) Integer specialtyId) {
+        return doctorService.getAllDoctorResponses(specialtyId);
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
-    public Doctor getById(@PathVariable Integer id) {
-        return doctorService.getDoctorById(id);
+    public DoctorResponse getById(@PathVariable Integer id) {
+        return doctorService.getDoctorResponseById(id);
     }
 
     @GetMapping("/me")
     @PreAuthorize("hasAuthority('ROLE_DOCTOR')")
-    public Doctor getMyProfile() {
+    public DoctorResponse getMyProfile() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || authentication.getName() == null) {
             throw new BusinessException(HttpStatus.UNAUTHORIZED, "Khong xac dinh duoc nguoi dung hien tai.");
         }
-        return doctorService.getDoctorByAccountUsername(authentication.getName());
+        return doctorService.getDoctorResponseByAccountUsername(authentication.getName());
     }
 
     @PostMapping
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public Doctor create(@RequestBody Doctor doctor) {
-        return doctorService.createDoctor(doctor);
+    public DoctorResponse create(@RequestBody Doctor doctor) {
+        return doctorService.toDoctorResponse(doctorService.createDoctor(doctor));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public Doctor update(@PathVariable Integer id, @RequestBody Doctor doctor) {
-        return doctorService.updateDoctor(id, doctor);
+    public DoctorResponse update(@PathVariable Integer id, @RequestBody Doctor doctor) {
+        return doctorService.toDoctorResponse(doctorService.updateDoctor(id, doctor));
     }
 
     @DeleteMapping("/{id}")
