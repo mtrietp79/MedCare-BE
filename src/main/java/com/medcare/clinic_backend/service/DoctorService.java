@@ -2,18 +2,25 @@ package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.entity.Account;
 import com.medcare.clinic_backend.entity.Doctor;
+import com.medcare.clinic_backend.entity.DoctorPhoto;
 import com.medcare.clinic_backend.dto.DoctorResponse;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AccountRepository;
+import com.medcare.clinic_backend.repository.DoctorPhotoRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class DoctorService {
@@ -22,27 +29,54 @@ public class DoctorService {
     private DoctorRepository doctorRepository;
 
     @Autowired
+    private DoctorPhotoRepository doctorPhotoRepository;
+
+    @Autowired
     private AccountRepository accountRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Value("${app.doctor-photo.max-size-bytes:2097152}")
+    private long maxDoctorPhotoSizeBytes;
+
+    private static final Set<String> ALLOWED_PHOTO_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+    );
 
     public List<Doctor> getAllDoctors() {
         return getAllDoctors(null);
     }
 
     public List<Doctor> getAllDoctors(Integer specialtyId) {
+        return getAllDoctors(specialtyId, null);
+    }
+
+    public List<Doctor> getAllDoctors(Integer specialtyId, String name) {
+        String normalizedName = normalizeText(name);
         if (specialtyId == null) {
-            return doctorRepository.findAll();
+            if (normalizedName == null) {
+                return doctorRepository.findAll();
+            }
+            return doctorRepository.findByFullNameContainingIgnoreCase(normalizedName);
         }
         if (specialtyId <= 0) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "specialtyId phai la so duong.");
         }
-        return doctorRepository.findBySpecialty_Id(specialtyId);
+        if (normalizedName == null) {
+            return doctorRepository.findBySpecialty_Id(specialtyId);
+        }
+        return doctorRepository.findBySpecialty_IdAndFullNameContainingIgnoreCase(specialtyId, normalizedName);
     }
 
     public List<DoctorResponse> getAllDoctorResponses(Integer specialtyId) {
-        return getAllDoctors(specialtyId).stream()
+        return getAllDoctorResponses(specialtyId, null);
+    }
+
+    public List<DoctorResponse> getAllDoctorResponses(Integer specialtyId, String name) {
+        return getAllDoctors(specialtyId, name).stream()
                 .map(this::toDoctorResponse)
                 .toList();
     }
@@ -100,6 +134,7 @@ public class DoctorService {
         int normalizedExperienceYears = doctor.getExperienceYears() == null ? 0 : doctor.getExperienceYears();
         response.setExperienceYears(normalizedExperienceYears);
         response.setExperience(normalizedExperienceYears);
+        applyPhotoFields(response, doctor);
 
         DoctorResponse.SpecialtySummary specialtySummary = new DoctorResponse.SpecialtySummary();
         if (doctor.getSpecialty() != null) {
@@ -138,6 +173,38 @@ public class DoctorService {
         response.setAccount(accountSummary);
 
         return response;
+    }
+
+    @Transactional
+    public DoctorResponse uploadOwnPhoto(String username, MultipartFile file) {
+        Doctor doctor = getDoctorByAccountUsername(username);
+        return toDoctorResponse(saveDoctorPhoto(doctor, file));
+    }
+
+    @Transactional
+    public DoctorResponse uploadDoctorPhoto(Integer doctorId, MultipartFile file) {
+        Doctor doctor = getDoctorById(doctorId);
+        return toDoctorResponse(saveDoctorPhoto(doctor, file));
+    }
+
+    public DoctorPhoto getDoctorPhoto(Integer doctorId) {
+        return doctorPhotoRepository.findByDoctorId(doctorId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Bac si nay chua co anh dai dien."));
+    }
+
+    @Transactional
+    public void deleteOwnPhoto(String username) {
+        Doctor doctor = getDoctorByAccountUsername(username);
+        deleteDoctorPhoto(doctor.getId());
+    }
+
+    @Transactional
+    public void deleteDoctorPhoto(Integer doctorId) {
+        getDoctorById(doctorId);
+        if (!doctorPhotoRepository.existsByDoctorId(doctorId)) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "Bac si nay chua co anh dai dien.");
+        }
+        doctorPhotoRepository.deleteByDoctorId(doctorId);
     }
 
     @Transactional
@@ -302,6 +369,70 @@ public class DoctorService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Account duoc gan cho bac si phai co ROLE_DOCTOR.");
         }
         return persistedAccount;
+    }
+
+    private Doctor saveDoctorPhoto(Doctor doctor, MultipartFile file) {
+        validateDoctorPhoto(file);
+
+        DoctorPhoto photo = doctorPhotoRepository.findByDoctorId(doctor.getId())
+                .orElseGet(() -> {
+                    DoctorPhoto newPhoto = new DoctorPhoto();
+                    newPhoto.setDoctor(doctor);
+                    return newPhoto;
+                });
+
+        try {
+            photo.setFileName(resolveFileName(file.getOriginalFilename()));
+            photo.setContentType(file.getContentType());
+            photo.setFileSize(file.getSize());
+            photo.setData(file.getBytes());
+            photo.setUploadedAt(LocalDateTime.now());
+        } catch (IOException ex) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong doc duoc file anh bac si.");
+        }
+
+        doctorPhotoRepository.save(photo);
+        return doctor;
+    }
+
+    private void validateDoctorPhoto(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Vui long chon file anh bac si.");
+        }
+        if (file.getSize() > maxDoctorPhotoSizeBytes) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Anh bac si khong duoc vuot qua 2MB.");
+        }
+        String contentType = normalizeText(file.getContentType());
+        if (contentType == null || !ALLOWED_PHOTO_CONTENT_TYPES.contains(contentType.toLowerCase())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Anh bac si chi ho tro JPEG, PNG hoac WEBP.");
+        }
+    }
+
+    private String resolveFileName(String originalFileName) {
+        String normalized = normalizeText(originalFileName);
+        return normalized == null ? "doctor-photo" : normalized;
+    }
+
+    private void applyPhotoFields(DoctorResponse response, Doctor doctor) {
+        if (doctor.getId() == null) {
+            response.setPhotoId(null);
+            response.setPhotoUrl(null);
+            response.setImageUrl(null);
+            return;
+        }
+
+        DoctorPhoto photo = doctorPhotoRepository.findByDoctorId(doctor.getId()).orElse(null);
+        if (photo == null || photo.getId() == null) {
+            response.setPhotoId(null);
+            response.setPhotoUrl(null);
+            response.setImageUrl(null);
+            return;
+        }
+
+        String photoUrl = "/api/doctors/" + doctor.getId() + "/photo";
+        response.setPhotoId(photo.getId());
+        response.setPhotoUrl(photoUrl);
+        response.setImageUrl(photoUrl);
     }
 
     private String normalizeText(String value) {

@@ -14,6 +14,9 @@ public class DoctorResponse {
     private Double rating;
     private Integer experienceYears;
     private Integer experience;
+    private Integer photoId;
+    private String photoUrl;
+    private String imageUrl;
 
     private Integer specialtyId;
     private String specialtyName;
@@ -95,6 +98,30 @@ public class DoctorResponse {
 
     public void setExperience(Integer experience) {
         this.experience = experience;
+    }
+
+    public Integer getPhotoId() {
+        return photoId;
+    }
+
+    public void setPhotoId(Integer photoId) {
+        this.photoId = photoId;
+    }
+
+    public String getPhotoUrl() {
+        return photoUrl;
+    }
+
+    public void setPhotoUrl(String photoUrl) {
+        this.photoUrl = photoUrl;
+    }
+
+    public String getImageUrl() {
+        return imageUrl;
+    }
+
+    public void setImageUrl(String imageUrl) {
+        this.imageUrl = imageUrl;
     }
 
     public Integer getSpecialtyId() {
