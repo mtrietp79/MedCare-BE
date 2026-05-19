@@ -109,7 +109,8 @@ public class PatientService {
         if (!Boolean.TRUE.equals(patient.getProfileCompleted())) {
             throw new BusinessException(
                     HttpStatus.BAD_REQUEST,
-                    "Vui long cap nhat day du ho so ca nhan truoc khi dat lich."
+                    "Vui long cap nhat day du ho so ca nhan truoc khi dat lich.",
+                    "PROFILE_INCOMPLETE"
             );
         }
     }

@@ -81,7 +81,8 @@
 ```
 
 - FE rule:
-  - If `role = ROLE_PATIENT` and `profileCompleted = false`, redirect user to first-time profile form.
+  - Do not redirect or show the patient profile form immediately after login.
+  - `profileCompleted` is only a status flag. Use it on `/patient/profile` and inside the booking patient-information step.
 
 ### `GET /api/auth/me`
 
@@ -164,15 +165,21 @@
 
 ---
 
-## 4) Patient first-time profile flow
+## 4) Patient profile completion flow
 
 ### FE flow after patient login
 
 1. Call `/api/auth/login`.
-2. If response has `profileCompleted = false`, redirect to profile form page.
-3. Call `GET /api/patients/me` to get current patient profile.
-4. Submit form to `PUT /api/patients/me`.
-5. Only after profile is complete should FE allow booking UI.
+2. Store auth data as usual.
+3. Do not redirect to profile form and do not open a profile-completion modal on home.
+4. If `role = ROLE_PATIENT` and `profileCompleted = false`, keep the user on the intended page.
+
+### Allowed places to show the incomplete-profile form
+
+1. `/patient/profile`: user opens this page voluntarily. Call `GET /api/patients/me`, render the existing form, and submit to `PUT /api/patients/me`.
+2. Booking flow: when the user reaches the patient-information step, call `GET /api/patients/me`. If `profileCompleted = false`, show the same form inside that booking step and submit to `PUT /api/patients/me`. After success, continue booking.
+
+Do not show this form on home or as a global login guard.
 
 ### Required fields for completed patient profile
 
@@ -323,6 +330,16 @@
 - Important:
   - patient is auto-resolved from current token
   - only allowed when patient profile is completed
+  - if profile is incomplete, backend returns:
+
+```json
+{
+  "message": "Vui long cap nhat day du ho so ca nhan truoc khi dat lich.",
+  "code": "PROFILE_INCOMPLETE"
+}
+```
+
+FE should handle `PROFILE_INCOMPLETE` only inside the booking flow by returning the user to the patient-information step and showing the profile form there.
 
 - Example request:
 
@@ -381,17 +398,77 @@
 ### `GET /api/doctors`
 
 - Role: `ROLE_ADMIN` / `ROLE_DOCTOR` / `ROLE_PATIENT`
-- Query optional: `specialtyId`
+- Query optional:
+  - `specialtyId`
+  - `name`: search by doctor full name, case-insensitive
 - Response bo sung cac truong de FE filter an toan:
   - `fullName`, `name`
   - `email`, `phone`
+  - `photoId`, `photoUrl`, `imageUrl`
   - `specialtyName`, `specialization`
   - `username`
   - van giu object `specialty` va `account`
 
+Example:
+
+`GET /api/doctors?name=nguyen`
+
+Response item example:
+
+```json
+{
+  "id": 5,
+  "fullName": "Bac si Nguyen Van A",
+  "name": "Bac si Nguyen Van A",
+  "email": "doctor.a@medcare.vn",
+  "phone": "0901234567",
+  "price": 300000,
+  "rating": 4.8,
+  "experienceYears": 8,
+  "experience": 8,
+  "photoId": 2,
+  "photoUrl": "/api/doctors/5/photo",
+  "imageUrl": "/api/doctors/5/photo",
+  "specialtyId": 1,
+  "specialtyName": "Noi tong quat",
+  "specialization": "Noi tong quat"
+}
+```
+
+FE rule:
+- On `/doctors`, add a search input for doctor name.
+- Debounce the input and call `GET /api/doctors?name=<keyword>`.
+- If specialty filter is also active, call `GET /api/doctors?specialtyId=<id>&name=<keyword>`.
+- Use `photoUrl` or `imageUrl` for doctor avatar. If null, show default avatar.
+
 ### `GET /api/doctors/{id}`
 
 - Role: `ROLE_ADMIN` / `ROLE_DOCTOR` / `ROLE_PATIENT`
+
+### `GET /api/doctors/me`
+
+- Role: `ROLE_DOCTOR`
+- Returns current doctor's profile, including optional `photoUrl`.
+
+### `PUT /api/doctors/me/photo`
+
+- Role: `ROLE_DOCTOR`
+- Purpose: optional upload/update doctor personal photo in doctor's own profile.
+- Content-Type: `multipart/form-data`
+- Form field: `file`
+- Supported file types: JPEG, PNG, WEBP
+- Max size: 2MB
+- Success response: updated `DoctorResponse` with `photoUrl`.
+
+### `DELETE /api/doctors/me/photo`
+
+- Role: `ROLE_DOCTOR`
+- Purpose: remove current doctor's personal photo.
+
+### `GET /api/doctors/{id}/photo`
+
+- Public image endpoint for rendering doctor photo in `<img>`.
+- Returns raw image bytes with image content type.
 
 ### `POST /api/doctors`
 
@@ -416,6 +493,18 @@
 ### `PUT /api/doctors/{id}`
 
 - Role: `ROLE_ADMIN`
+
+### `PUT /api/doctors/{id}/photo`
+
+- Role: `ROLE_ADMIN`
+- Content-Type: `multipart/form-data`
+- Form field: `file`
+- Upload/update photo for a doctor.
+
+### `DELETE /api/doctors/{id}/photo`
+
+- Role: `ROLE_ADMIN`
+- Remove photo for a doctor.
 
 ### `DELETE /api/doctors/{id}`
 
@@ -610,9 +699,8 @@
 
 1. Call `POST /api/auth/register`.
 2. Call `POST /api/auth/login`.
-3. If `profileCompleted = false`, redirect to profile form page.
-4. Call `PUT /api/patients/me` to complete patient profile.
-5. After success, allow booking flow.
+3. Do not redirect to profile form and do not show a global profile modal on home.
+4. Let the user update the profile voluntarily at `/patient/profile`, or require it only inside the booking patient-information step.
 
 ### Forgot password
 
@@ -625,6 +713,8 @@
 
 1. Call `GET /api/doctors` or doctor detail APIs.
 2. Call `GET /api/appointments/doctor/{doctorId}/slots?date=...`.
-3. Call `POST /api/appointments`.
-4. Show `appointmentCode` as booking ticket code.
-5. Show booking history from `GET /api/appointments`.
+3. At the patient-information step, call `GET /api/patients/me`.
+4. If `profileCompleted = false`, show the profile form in this step and submit `PUT /api/patients/me`.
+5. After profile is complete, call `POST /api/appointments`.
+6. Show `appointmentCode` as booking ticket code.
+7. Show booking history from `GET /api/appointments`.

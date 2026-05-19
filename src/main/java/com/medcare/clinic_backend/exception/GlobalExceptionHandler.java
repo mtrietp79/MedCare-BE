@@ -20,6 +20,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Map<String, String>> handleBusinessException(BusinessException ex) {
+        if (ex.getCode() != null && !ex.getCode().isBlank()) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of(
+                            "message", ex.getMessage(),
+                            "code", ex.getCode()
+                    ));
+        }
         return ResponseEntity.status(ex.getStatus())
                 .body(Map.of("message", ex.getMessage()));
     }

@@ -22,6 +22,10 @@ public interface DoctorRepository extends JpaRepository<Doctor, Integer> {
 
     List<Doctor> findBySpecialty_Id(Integer specialtyId);
 
+    List<Doctor> findByFullNameContainingIgnoreCase(String name);
+
+    List<Doctor> findBySpecialty_IdAndFullNameContainingIgnoreCase(Integer specialtyId, String name);
+
     long countBySpecialty_Id(Integer specialtyId);
 
     List<Doctor> findByFullNameContainingIgnoreCaseOrSpecialty_NameContainingIgnoreCase(String fullNameKeyword, String specialtyKeyword);
