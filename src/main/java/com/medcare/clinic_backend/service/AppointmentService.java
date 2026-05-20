@@ -4,6 +4,7 @@ import com.medcare.clinic_backend.dto.BookingRulesDto;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
+import com.medcare.clinic_backend.entity.MedicalService;
 import com.medcare.clinic_backend.entity.Specialty;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
@@ -40,6 +41,9 @@ public class AppointmentService {
 
     @Autowired
     private AppointmentNotificationService appointmentNotificationService;
+
+    @Autowired
+    private MedicalServiceService medicalServiceService;
 
     public List<Appointment> getAllAppointments() {
         return appointmentRepository.findAll();
@@ -82,6 +86,7 @@ public class AppointmentService {
 
         Integer patientId = app.getPatient() == null ? null : app.getPatient().getId();
         patientService.ensureProfileCompleted(patientId);
+        applyRequestedMedicalService(app);
 
         SlotRule slotRule = resolveSlotRule(app.getAppointmentDate());
         app.setAppointmentDate(slotRule.start());
@@ -186,7 +191,8 @@ public class AppointmentService {
         }
 
         appointment.setDoctor(targetDoctor);
-        appointment.setConsultationFee(resolveConsultationFee(targetDoctor));
+        applyUpdatedMedicalService(appointment, appointmentDetails);
+        applyAppointmentPricing(appointment, targetDoctor);
 
         if (appointmentDetails.getStatus() != null && !appointmentDetails.getStatus().isBlank()) {
             validateStatus(appointmentDetails.getStatus());
@@ -375,6 +381,68 @@ public class AppointmentService {
         appointment.setSpecialty(doctorSpecialty);
     }
 
+    private void applyRequestedMedicalService(Appointment appointment) {
+        if (appointment.getMedicalService() == null || appointment.getMedicalService().getId() == null) {
+            appointment.setMedicalService(null);
+            return;
+        }
+
+        MedicalService selectedService = medicalServiceService.getActiveByIdForBooking(appointment.getMedicalService().getId());
+        Specialty serviceSpecialty = selectedService.getSpecialty();
+        if (serviceSpecialty == null || serviceSpecialty.getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu chua duoc gan chuyen khoa.");
+        }
+
+        if (appointment.getSpecialty() == null || appointment.getSpecialty().getId() == null) {
+            appointment.setSpecialty(serviceSpecialty);
+        } else if (!appointment.getSpecialty().getId().equals(serviceSpecialty.getId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu khong thuoc chuyen khoa da chon.");
+        }
+
+        appointment.setMedicalService(selectedService);
+    }
+
+    private void applyUpdatedMedicalService(Appointment appointment, Appointment appointmentDetails) {
+        if (appointmentDetails.getMedicalService() == null) {
+            validateExistingMedicalServiceSpecialty(appointment);
+            return;
+        }
+
+        if (appointmentDetails.getMedicalService().getId() == null) {
+            appointment.setMedicalService(null);
+            return;
+        }
+
+        MedicalService selectedService = medicalServiceService.getActiveByIdForBooking(appointmentDetails.getMedicalService().getId());
+        Specialty serviceSpecialty = selectedService.getSpecialty();
+        Integer appointmentSpecialtyId = appointment.getSpecialty() == null ? null : appointment.getSpecialty().getId();
+
+        if (serviceSpecialty == null || serviceSpecialty.getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu chua duoc gan chuyen khoa.");
+        }
+        if (appointmentSpecialtyId != null && !appointmentSpecialtyId.equals(serviceSpecialty.getId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu khong thuoc chuyen khoa cua lich hen.");
+        }
+
+        appointment.setMedicalService(selectedService);
+    }
+
+    private void validateExistingMedicalServiceSpecialty(Appointment appointment) {
+        if (appointment.getMedicalService() == null || appointment.getMedicalService().getId() == null) {
+            return;
+        }
+
+        MedicalService selectedService = medicalServiceService.getActiveByIdForBooking(appointment.getMedicalService().getId());
+        Specialty serviceSpecialty = selectedService.getSpecialty();
+        Integer appointmentSpecialtyId = appointment.getSpecialty() == null ? null : appointment.getSpecialty().getId();
+        if (serviceSpecialty != null && serviceSpecialty.getId() != null
+                && appointmentSpecialtyId != null
+                && !appointmentSpecialtyId.equals(serviceSpecialty.getId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu khong thuoc chuyen khoa cua lich hen.");
+        }
+        appointment.setMedicalService(selectedService);
+    }
+
     private void applyUpdatedSpecialty(Appointment appointment, Appointment appointmentDetails, Doctor doctor) {
         Specialty requestSpecialty = appointmentDetails.getSpecialty();
         Specialty doctorSpecialty = doctor.getSpecialty();
@@ -404,6 +472,17 @@ public class AppointmentService {
 
     private void applyDoctorPricing(Appointment appointment, Doctor doctor) {
         appointment.setDoctor(doctor);
+        applyAppointmentPricing(appointment, doctor);
+    }
+
+    private void applyAppointmentPricing(Appointment appointment, Doctor doctor) {
+        if (appointment.getMedicalService() != null && appointment.getMedicalService().getId() != null) {
+            MedicalService selectedService = medicalServiceService.getActiveByIdForBooking(appointment.getMedicalService().getId());
+            appointment.setMedicalService(selectedService);
+            appointment.setConsultationFee(selectedService.getPrice());
+            return;
+        }
+
         appointment.setConsultationFee(resolveConsultationFee(doctor));
     }
 

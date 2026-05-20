@@ -346,11 +346,17 @@ FE should handle `PROFILE_INCOMPLETE` only inside the booking flow by returning 
 ```json
 {
   "specialty": { "id": 1 },
+  "medicalService": { "id": 3 },
   "doctor": { "id": 5 },
   "appointmentDate": "2026-04-23T08:00:00",
   "symptoms": "Ho, sot"
 }
 ```
+
+- `medicalService` is optional.
+- If omitted/null, appointment is a normal consultation and FE should display service as `Kham benh`.
+- If provided, backend validates that the service is active and belongs to the selected specialty.
+- When `medicalService` is selected, `consultationFee` is set from the service package price.
 
 - Example success response:
 
@@ -368,6 +374,12 @@ FE should handle `PROFILE_INCOMPLETE` only inside the booking flow by returning 
   "doctor": {
     "id": 5,
     "fullName": "Bac si Nguyen Van A"
+  },
+  "medicalService": {
+    "id": 3,
+    "name": "Dich vu xet nghiem mau",
+    "price": 450000.0,
+    "active": true
   },
   "appointmentDate": "2026-04-23T08:00:00",
   "status": "PENDING",
@@ -612,7 +624,128 @@ FE rule:
 
 ### `GET /api/medical-services`
 
+- Public.
+- Purpose: service package list for `services` tab/page, booking specialty step, and home ads.
+- Query optional:
+  - `specialtyId`: only active services of selected specialty.
+
+Example:
+
+`GET /api/medical-services?specialtyId=1`
+
+Response item example:
+
+```json
+{
+  "id": 3,
+  "name": "Dich vu xet nghiem mau",
+  "description": "Goi xet nghiem cong thuc mau co ban.",
+  "price": 450000.0,
+  "imageUrl": "/api/medical-services/3/photo",
+  "active": true,
+  "specialty": {
+    "id": 1,
+    "name": "Noi tong quat"
+  },
+  "prescriptionItems": [
+    {
+      "id": 10,
+      "medicine": {
+        "id": 2,
+        "name": "Paracetamol"
+      },
+      "quantity": 10,
+      "dosage": "Sang 1 vien, toi 1 vien sau an"
+    }
+  ]
+}
+```
+
+Notes:
+- `imageUrl` is returned by backend when the service has a photo in database.
+- `prescriptionItems` can be empty. Empty means doctor will prescribe after examination.
+- FE booking flow: after user chooses specialty, call `GET /api/medical-services?specialtyId=<id>` and show service package as optional selection.
+
+### `GET /api/medical-services/{id}`
+
+- Public.
+
+### `GET /api/medical-services/admin`
+
+- Role: `ROLE_ADMIN`
+- Returns all service packages, including inactive/stopped packages.
+- Query optional:
+  - `specialtyId`
+
 ### `POST /api/medical-services`
+
+- Role: `ROLE_ADMIN`
+
+Example request:
+
+```json
+{
+  "name": "Dich vu kham tong quat",
+  "description": "Kham tong quat theo chuyen khoa noi.",
+  "price": 600000,
+  "active": true,
+  "specialty": { "id": 1 },
+  "prescriptionItems": []
+}
+```
+
+Example with predefined medicines:
+
+```json
+{
+  "name": "Dich vu xet nghiem mau",
+  "description": "Goi xet nghiem va tu van sau ket qua.",
+  "price": 450000,
+  "specialty": { "id": 1 },
+  "prescriptionItems": [
+    {
+      "medicine": { "id": 2 },
+      "quantity": 10,
+      "dosage": "Sang 1 vien sau an"
+    }
+  ]
+}
+```
+
+### `PUT /api/medical-services/{id}`
+
+- Role: `ROLE_ADMIN`
+- Full update service package.
+
+### `PATCH /api/medical-services/{id}/active?active=false`
+
+- Role: `ROLE_ADMIN`
+- Stop or reactivate service package without deleting historical appointments.
+
+### `PUT /api/medical-services/{id}/photo`
+
+- Role: `ROLE_ADMIN`
+- Content-Type: `multipart/form-data`
+- Form field: `file`
+- Supported file types: JPEG, PNG, WEBP
+- Max size: 2MB
+- Stores image bytes in database, same style as doctor photo.
+- Success response: updated service package with `imageUrl`.
+
+### `GET /api/medical-services/{id}/photo`
+
+- Public image endpoint for rendering service photo in `<img>`.
+- Returns raw image bytes with image content type.
+
+### `DELETE /api/medical-services/{id}/photo`
+
+- Role: `ROLE_ADMIN`
+- Remove photo for a service package.
+
+FE page suggestions:
+- Add nav tab `services` beside home/doctor/booking.
+- Home service ad can show several active items from `GET /api/medical-services`.
+- Booking appointment info should display `appointment.medicalService.name`; if null display `Kham benh`.
 
 ---
 

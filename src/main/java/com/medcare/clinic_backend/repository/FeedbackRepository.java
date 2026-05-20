@@ -9,4 +9,6 @@ public interface FeedbackRepository extends JpaRepository<Feedback, Integer> {
     // Lấy toàn bộ đánh giá của 1 bác sĩ cụ thể (sắp xếp mới nhất lên đầu)
     List<Feedback> findByDoctorIdOrderByCreatedAtDesc(Integer doctorId);
 
+    List<Feedback> findAllByOrderByCreatedAtDesc();
+
 }
