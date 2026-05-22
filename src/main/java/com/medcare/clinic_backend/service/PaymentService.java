@@ -2,9 +2,11 @@ package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.config.VNPayConfig;
 import com.medcare.clinic_backend.entity.Appointment;
+import com.medcare.clinic_backend.entity.Patient;
 import com.medcare.clinic_backend.entity.TransactionLog;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
+import com.medcare.clinic_backend.repository.PatientRepository;
 import com.medcare.clinic_backend.repository.TransactionLogRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +32,9 @@ public class PaymentService {
     @Autowired
     private AppointmentRepository appointmentRepository;
 
+    @Autowired
+    private PatientRepository patientRepository;
+
     @Value("${vnpay.hashSecret}")
     private String secretKey;
 
@@ -45,6 +50,36 @@ public class PaymentService {
         }
 
         return Math.round(appointment.getConsultationFee());
+    }
+
+    @Transactional
+    public Appointment choosePayAtClinic(Integer appointmentId, String username) {
+        if (appointmentId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu appointmentId.");
+        }
+        if (username == null || username.isBlank()) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "Khong xac dinh duoc nguoi dung hien tai.");
+        }
+
+        Patient patient = patientRepository.findByAccount_Username(username)
+                .orElseThrow(() -> new BusinessException(
+                        HttpStatus.BAD_REQUEST,
+                        "Tai khoan cua ban chua duoc lien ket voi ho so benh nhan."
+                ));
+
+        Appointment appointment = appointmentRepository.findByIdAndPatientId(appointmentId, patient.getId())
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen ID: " + appointmentId));
+
+        String currentPaymentStatus = appointment.getPaymentStatus();
+        if ("PAID_ONLINE".equalsIgnoreCase(currentPaymentStatus) || "PAID".equalsIgnoreCase(currentPaymentStatus)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich hen nay da duoc thanh toan.");
+        }
+        if ("CANCELLED".equalsIgnoreCase(appointment.getStatus())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the chon thanh toan cho lich hen da huy.");
+        }
+
+        appointment.setPaymentStatus("PAY_AT_CLINIC");
+        return appointmentRepository.save(appointment);
     }
 
     @Transactional

@@ -44,6 +44,12 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
 
     long countByAppointmentDateBetween(LocalDateTime start, LocalDateTime end);
 
+    long countByDoctorId(Integer doctorId);
+
+    long countByDoctorIdAndAppointmentDateBetween(Integer doctorId, LocalDateTime start, LocalDateTime end);
+
+    long countByDoctorIdAndStatus(Integer doctorId, String status);
+
     List<Appointment> findTop5ByOrderByAppointmentDateDesc();
 
     List<Appointment> findByPatientIdOrderByAppointmentDateDesc(Integer patientId);
@@ -56,6 +62,9 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
 
     @Query("SELECT DISTINCT a.patient FROM Appointment a WHERE a.doctor.id = :doctorId ORDER BY a.patient.fullName ASC")
     List<Patient> findDistinctPatientsByDoctorId(@Param("doctorId") Integer doctorId);
+
+    @Query("SELECT COUNT(DISTINCT a.patient.id) FROM Appointment a WHERE a.doctor.id = :doctorId")
+    long countDistinctPatientsByDoctorId(@Param("doctorId") Integer doctorId);
 
     boolean existsByDoctorIdAndPatientId(Integer doctorId, Integer patientId);
 

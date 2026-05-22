@@ -16,7 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/doctor-schedules")
+@RequestMapping({"/api/doctor-schedules", "/api/schedules"})
 public class DoctorScheduleController {
 
     @Autowired

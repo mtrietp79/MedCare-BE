@@ -48,6 +48,14 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/testimonials").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/feedbacks/doctor/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/specialties", "/api/specialties/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/doctors", "/api/doctors/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/medical-services/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/appointments/booking-rules").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/appointments/doctor/*/slots").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/appointments/medical-service/*/slots").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/doctors/*/photo").permitAll()
                         .requestMatchers("/api/payment/vnpay-return").permitAll()
                         .requestMatchers(

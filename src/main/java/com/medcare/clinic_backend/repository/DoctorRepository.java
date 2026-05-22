@@ -31,4 +31,8 @@ public interface DoctorRepository extends JpaRepository<Doctor, Integer> {
     List<Doctor> findByFullNameContainingIgnoreCaseOrSpecialty_NameContainingIgnoreCase(String fullNameKeyword, String specialtyKeyword);
 
     boolean existsByAccountId(Integer accountId);
+
+    boolean existsByEmail(String email);
+
+    boolean existsByEmailAndIdNot(String email, Integer id);
 }

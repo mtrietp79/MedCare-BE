@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.entity;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.Data;
 
@@ -16,6 +17,7 @@ public class Doctor {
     private Integer id;
 
     @Column(name = "full_name", nullable = false, length = 100)
+    @JsonAlias({"name", "doctorName"})
     private String fullName;
 
     @Column(name = "email", nullable = false, length = 100, unique = true)
@@ -38,7 +40,17 @@ public class Doctor {
     @JoinColumn(name = "specialty_id", nullable = false)
     private Specialty specialty;
 
+    @Transient
+    private Integer specialtyId;
+
     @OneToOne
     @JoinColumn(name = "account_id", referencedColumnName = "id")
     private Account account;
+
+    @Transient
+    private String username;
+
+    @Transient
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private String password;
 }

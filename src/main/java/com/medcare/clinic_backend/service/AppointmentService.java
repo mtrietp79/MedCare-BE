@@ -4,6 +4,7 @@ import com.medcare.clinic_backend.dto.BookingRulesDto;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
+import com.medcare.clinic_backend.entity.MedicalService;
 import com.medcare.clinic_backend.entity.Specialty;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
@@ -17,9 +18,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -40,6 +40,9 @@ public class AppointmentService {
 
     @Autowired
     private AppointmentNotificationService appointmentNotificationService;
+
+    @Autowired
+    private MedicalServiceService medicalServiceService;
 
     public List<Appointment> getAllAppointments() {
         return appointmentRepository.findAll();
@@ -82,6 +85,7 @@ public class AppointmentService {
 
         Integer patientId = app.getPatient() == null ? null : app.getPatient().getId();
         patientService.ensureProfileCompleted(patientId);
+        applyRequestedMedicalService(app);
 
         SlotRule slotRule = resolveSlotRule(app.getAppointmentDate());
         app.setAppointmentDate(slotRule.start());
@@ -149,6 +153,54 @@ public class AppointmentService {
         return result;
     }
 
+    public List<SlotAvailabilityDto> getMedicalServiceSlotStatus(Integer serviceId, LocalDate date) {
+        if (date == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu ngay can kiem tra slot.");
+        }
+
+        MedicalService service = medicalServiceService.getActiveByIdForBooking(serviceId);
+        if (service.getSpecialty() == null || service.getSpecialty().getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu chua duoc gan chuyen khoa.");
+        }
+        Doctor assignedDoctor = service.getAssignedDoctor();
+        List<Integer> candidateDoctorIds = assignedDoctor != null && assignedDoctor.getId() != null
+                ? List.of(assignedDoctor.getId())
+                : doctorRepository.findBySpecialty_Id(service.getSpecialty().getId()).stream()
+                .map(Doctor::getId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
+
+        List<SlotAvailabilityDto> result = new ArrayList<>();
+        LocalDateTime serverNow = LocalDateTime.now();
+        LocalDateTime minAllowedStart = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
+
+        for (SlotRule slotRule : buildDailySlotRules(date)) {
+            long totalBookedPatients = candidateDoctorIds.stream()
+                    .mapToLong(doctorId -> appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end()))
+                    .sum();
+            int totalMaxPatients = slotRule.maxPatients() * candidateDoctorIds.size();
+            boolean hasAvailableDoctor = candidateDoctorIds.stream()
+                    .anyMatch(doctorId -> appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end()) < slotRule.maxPatients());
+            boolean full = candidateDoctorIds.isEmpty() || !hasAvailableDoctor;
+            String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart);
+            boolean disabled = disabledReason != null;
+
+            result.add(new SlotAvailabilityDto(
+                    slotRule.start(),
+                    slotRule.end(),
+                    slotRule.shift(),
+                    totalMaxPatients,
+                    totalBookedPatients,
+                    full,
+                    disabled,
+                    disabledReason
+            ));
+        }
+
+        return result;
+    }
+
     @Transactional
     public Appointment updateAppointment(Integer id, Appointment appointmentDetails) {
         Appointment appointment = appointmentRepository.findById(id)
@@ -186,7 +238,8 @@ public class AppointmentService {
         }
 
         appointment.setDoctor(targetDoctor);
-        appointment.setConsultationFee(resolveConsultationFee(targetDoctor));
+        applyUpdatedMedicalService(appointment, appointmentDetails);
+        applyAppointmentPricing(appointment, targetDoctor);
 
         if (appointmentDetails.getStatus() != null && !appointmentDetails.getStatus().isBlank()) {
             validateStatus(appointmentDetails.getStatus());
@@ -227,17 +280,8 @@ public class AppointmentService {
             return null;
         }
 
-        Map<Integer, Long> loadMap = candidateDoctorIds.stream()
-                .collect(Collectors.toMap(
-                        doctorId -> doctorId,
-                        doctorId -> appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end())
-                ));
-
-        List<Integer> orderedDoctorIds = candidateDoctorIds.stream()
-                .sorted(Comparator
-                        .comparingLong((Integer doctorId) -> loadMap.getOrDefault(doctorId, Long.MAX_VALUE))
-                        .thenComparingInt(doctorId -> doctorId))
-                .collect(Collectors.toList());
+        List<Integer> orderedDoctorIds = new ArrayList<>(candidateDoctorIds);
+        Collections.shuffle(orderedDoctorIds);
 
         for (Integer doctorId : orderedDoctorIds) {
             Doctor lockedDoctor = fetchDoctorForUpdate(doctorId);
@@ -375,6 +419,87 @@ public class AppointmentService {
         appointment.setSpecialty(doctorSpecialty);
     }
 
+    private void applyRequestedMedicalService(Appointment appointment) {
+        if (appointment.getMedicalService() == null || appointment.getMedicalService().getId() == null) {
+            appointment.setMedicalService(null);
+            return;
+        }
+
+        MedicalService selectedService = medicalServiceService.getActiveByIdForBooking(appointment.getMedicalService().getId());
+        Specialty serviceSpecialty = selectedService.getSpecialty();
+        if (serviceSpecialty == null || serviceSpecialty.getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu chua duoc gan chuyen khoa.");
+        }
+
+        if (appointment.getSpecialty() == null || appointment.getSpecialty().getId() == null) {
+            appointment.setSpecialty(serviceSpecialty);
+        } else if (!appointment.getSpecialty().getId().equals(serviceSpecialty.getId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu khong thuoc chuyen khoa da chon.");
+        }
+
+        Doctor assignedDoctor = selectedService.getAssignedDoctor();
+        if (assignedDoctor != null && assignedDoctor.getId() != null) {
+            if (appointment.getDoctor() != null
+                    && appointment.getDoctor().getId() != null
+                    && !appointment.getDoctor().getId().equals(assignedDoctor.getId())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu nay da co bac si dam nhan rieng.");
+            }
+            appointment.setDoctor(assignedDoctor);
+        }
+
+        appointment.setMedicalService(selectedService);
+    }
+
+    private void applyUpdatedMedicalService(Appointment appointment, Appointment appointmentDetails) {
+        if (appointmentDetails.getMedicalService() == null) {
+            validateExistingMedicalServiceSpecialty(appointment);
+            return;
+        }
+
+        if (appointmentDetails.getMedicalService().getId() == null) {
+            appointment.setMedicalService(null);
+            return;
+        }
+
+        MedicalService selectedService = medicalServiceService.getActiveByIdForBooking(appointmentDetails.getMedicalService().getId());
+        Specialty serviceSpecialty = selectedService.getSpecialty();
+        Integer appointmentSpecialtyId = appointment.getSpecialty() == null ? null : appointment.getSpecialty().getId();
+
+        if (serviceSpecialty == null || serviceSpecialty.getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu chua duoc gan chuyen khoa.");
+        }
+        if (appointmentSpecialtyId != null && !appointmentSpecialtyId.equals(serviceSpecialty.getId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu khong thuoc chuyen khoa cua lich hen.");
+        }
+
+        Doctor assignedDoctor = selectedService.getAssignedDoctor();
+        Integer appointmentDoctorId = appointment.getDoctor() == null ? null : appointment.getDoctor().getId();
+        if (assignedDoctor != null
+                && assignedDoctor.getId() != null
+                && appointmentDoctorId != null
+                && !assignedDoctor.getId().equals(appointmentDoctorId)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu nay da co bac si dam nhan rieng.");
+        }
+
+        appointment.setMedicalService(selectedService);
+    }
+
+    private void validateExistingMedicalServiceSpecialty(Appointment appointment) {
+        if (appointment.getMedicalService() == null || appointment.getMedicalService().getId() == null) {
+            return;
+        }
+
+        MedicalService selectedService = medicalServiceService.getActiveByIdForBooking(appointment.getMedicalService().getId());
+        Specialty serviceSpecialty = selectedService.getSpecialty();
+        Integer appointmentSpecialtyId = appointment.getSpecialty() == null ? null : appointment.getSpecialty().getId();
+        if (serviceSpecialty != null && serviceSpecialty.getId() != null
+                && appointmentSpecialtyId != null
+                && !appointmentSpecialtyId.equals(serviceSpecialty.getId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu khong thuoc chuyen khoa cua lich hen.");
+        }
+        appointment.setMedicalService(selectedService);
+    }
+
     private void applyUpdatedSpecialty(Appointment appointment, Appointment appointmentDetails, Doctor doctor) {
         Specialty requestSpecialty = appointmentDetails.getSpecialty();
         Specialty doctorSpecialty = doctor.getSpecialty();
@@ -404,6 +529,17 @@ public class AppointmentService {
 
     private void applyDoctorPricing(Appointment appointment, Doctor doctor) {
         appointment.setDoctor(doctor);
+        applyAppointmentPricing(appointment, doctor);
+    }
+
+    private void applyAppointmentPricing(Appointment appointment, Doctor doctor) {
+        if (appointment.getMedicalService() != null && appointment.getMedicalService().getId() != null) {
+            MedicalService selectedService = medicalServiceService.getActiveByIdForBooking(appointment.getMedicalService().getId());
+            appointment.setMedicalService(selectedService);
+            appointment.setConsultationFee(selectedService.getPrice());
+            return;
+        }
+
         appointment.setConsultationFee(resolveConsultationFee(doctor));
     }
 

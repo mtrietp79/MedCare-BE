@@ -8,17 +8,16 @@ import java.time.LocalDateTime;
 
 @Data
 @Entity
-@Table(name = "doctor_photos")
-public class DoctorPhoto {
-
+@Table(name = "medical_service_photos")
+public class MedicalServicePhoto {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
     @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "doctor_id", nullable = false, unique = true)
+    @JoinColumn(name = "medical_service_id", nullable = false, unique = true)
     @JsonIgnore
-    private Doctor doctor;
+    private MedicalService medicalService;
 
     @Column(name = "file_name", nullable = false, length = 255)
     private String fileName;

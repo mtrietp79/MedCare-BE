@@ -4,6 +4,21 @@ import com.medcare.clinic_backend.entity.MedicalService;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 @Repository
 public interface MedicalServiceRepository extends JpaRepository<MedicalService, Integer> {
+    List<MedicalService> findByActiveTrueOrderByIdDesc();
+
+    List<MedicalService> findBySpecialty_IdAndActiveTrueOrderByIdDesc(Integer specialtyId);
+
+    List<MedicalService> findBySpecialty_IdOrderByIdDesc(Integer specialtyId);
+
+    List<MedicalService> findByActiveTrueAndNameContainingIgnoreCaseOrderByIdDesc(String name);
+
+    List<MedicalService> findBySpecialty_IdAndActiveTrueAndNameContainingIgnoreCaseOrderByIdDesc(Integer specialtyId, String name);
+
+    List<MedicalService> findByNameContainingIgnoreCaseOrderByIdDesc(String name);
+
+    List<MedicalService> findBySpecialty_IdAndNameContainingIgnoreCaseOrderByIdDesc(Integer specialtyId, String name);
 }

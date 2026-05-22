@@ -27,6 +27,10 @@ public class FeedbackService {
         return feedbackRepository.findAll();
     }
 
+    public List<Feedback> getPublicTestimonials() {
+        return feedbackRepository.findAllByOrderByCreatedAtDesc();
+    }
+
     public List<Feedback> getFeedbacksByDoctor(Integer doctorId) {
         return feedbackRepository.findByDoctorIdOrderByCreatedAtDesc(doctorId);
     }
