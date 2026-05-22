@@ -30,9 +30,26 @@ public class MedicalService {
     @Column(nullable = false)
     private Boolean active = true;
 
+    @Transient
+    private String status;
+
+    @Column(nullable = false)
+    private Boolean advertised = false;
+
     @ManyToOne
     @JoinColumn(name = "specialty_id", nullable = false)
     private Specialty specialty;
+
+    @JsonIgnoreProperties({"account"})
+    @ManyToOne
+    @JoinColumn(name = "assigned_doctor_id")
+    private Doctor assignedDoctor;
+
+    @Transient
+    private Integer specialtyId;
+
+    @Transient
+    private Integer assignedDoctorId;
 
     @JsonIgnoreProperties("medicalService")
     @OneToMany(mappedBy = "medicalService", cascade = CascadeType.ALL, orphanRemoval = true)

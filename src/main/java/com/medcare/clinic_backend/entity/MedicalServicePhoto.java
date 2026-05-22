@@ -28,9 +28,8 @@ public class MedicalServicePhoto {
     @Column(name = "file_size", nullable = false)
     private Long fileSize;
 
-    @Lob
     @Basic(fetch = FetchType.LAZY)
-    @Column(name = "data", nullable = false)
+    @Column(name = "data", nullable = false, columnDefinition = "bytea")
     private byte[] data;
 
     @Column(name = "uploaded_at", nullable = false)

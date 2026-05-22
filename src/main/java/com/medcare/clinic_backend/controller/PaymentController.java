@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.controller;
 
 import com.medcare.clinic_backend.config.VNPayConfig;
+import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.service.PaymentService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -8,8 +9,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -115,6 +118,16 @@ public class PaymentController {
         String vnpSecureHash = VNPayConfig.hmacSHA512(secretKey, hashData.toString());
         String queryUrl = query + "&vnp_SecureHash=" + vnpSecureHash;
         return vnpPayUrl + "?" + queryUrl;
+    }
+
+    @PatchMapping("/pay-at-clinic")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public Appointment choosePayAtClinic(@RequestParam("appointmentId") Integer appointmentId,
+                                         Authentication authentication) {
+        return paymentService.choosePayAtClinic(
+                appointmentId,
+                authentication == null ? null : authentication.getName()
+        );
     }
 
     @GetMapping("/vnpay-return")

@@ -4,8 +4,10 @@ import com.medcare.clinic_backend.entity.MedicalService;
 import com.medcare.clinic_backend.entity.MedicalServicePhoto;
 import com.medcare.clinic_backend.entity.MedicalServicePrescriptionItem;
 import com.medcare.clinic_backend.entity.Medicine;
+import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.Specialty;
 import com.medcare.clinic_backend.exception.BusinessException;
+import com.medcare.clinic_backend.repository.DoctorRepository;
 import com.medcare.clinic_backend.repository.MedicalServicePhotoRepository;
 import com.medcare.clinic_backend.repository.MedicalServiceRepository;
 import com.medcare.clinic_backend.repository.MedicineRepository;
@@ -37,6 +39,9 @@ public class MedicalServiceService {
     @Autowired
     private MedicineRepository medicineRepository;
 
+    @Autowired
+    private DoctorRepository doctorRepository;
+
     @Value("${app.medical-service-photo.max-size-bytes:2097152}")
     private long maxServicePhotoSizeBytes;
 
@@ -46,26 +51,49 @@ public class MedicalServiceService {
             "image/webp"
     );
 
+    @Transactional(readOnly = true)
     public List<MedicalService> getActiveServices(Integer specialtyId) {
+        return getActiveServices(specialtyId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<MedicalService> getActiveServices(Integer specialtyId, String keyword) {
+        String normalizedKeyword = normalizeText(keyword);
         List<MedicalService> services;
-        if (specialtyId != null) {
-            services = repository.findBySpecialtyIdAndActiveTrueOrderByIdDesc(specialtyId);
+        if (specialtyId != null && normalizedKeyword != null) {
+            services = repository.findBySpecialty_IdAndActiveTrueAndNameContainingIgnoreCaseOrderByIdDesc(specialtyId, normalizedKeyword);
+        } else if (specialtyId != null) {
+            services = repository.findBySpecialty_IdAndActiveTrueOrderByIdDesc(specialtyId);
+        } else if (normalizedKeyword != null) {
+            services = repository.findByActiveTrueAndNameContainingIgnoreCaseOrderByIdDesc(normalizedKeyword);
         } else {
             services = repository.findByActiveTrueOrderByIdDesc();
         }
         return applyPhotoFields(services);
     }
 
+    @Transactional(readOnly = true)
     public List<MedicalService> getAllForAdmin(Integer specialtyId) {
+        return getAllForAdmin(specialtyId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<MedicalService> getAllForAdmin(Integer specialtyId, String keyword) {
+        String normalizedKeyword = normalizeText(keyword);
         List<MedicalService> services;
-        if (specialtyId != null) {
-            services = repository.findBySpecialtyIdOrderByIdDesc(specialtyId);
+        if (specialtyId != null && normalizedKeyword != null) {
+            services = repository.findBySpecialty_IdAndNameContainingIgnoreCaseOrderByIdDesc(specialtyId, normalizedKeyword);
+        } else if (specialtyId != null) {
+            services = repository.findBySpecialty_IdOrderByIdDesc(specialtyId);
+        } else if (normalizedKeyword != null) {
+            services = repository.findByNameContainingIgnoreCaseOrderByIdDesc(normalizedKeyword);
         } else {
             services = repository.findAll();
         }
         return applyPhotoFields(services);
     }
 
+    @Transactional(readOnly = true)
     public MedicalService getById(Integer id) {
         return applyPhotoFields(repository.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay goi dich vu ID: " + id)));
@@ -86,8 +114,10 @@ public class MedicalServiceService {
         existing.setName(details.getName());
         existing.setDescription(details.getDescription());
         existing.setPrice(details.getPrice());
-        existing.setActive(details.getActive() == null ? existing.getActive() : details.getActive());
-        existing.setSpecialty(resolveSpecialty(details.getSpecialty()));
+        existing.setActive(resolveActive(details, existing.getActive()));
+        existing.setAdvertised(details.getAdvertised() == null ? existing.getAdvertised() : details.getAdvertised());
+        existing.setSpecialty(resolveSpecialty(details));
+        existing.setAssignedDoctor(resolveAssignedDoctor(details, existing.getSpecialty()));
 
         existing.getPrescriptionItems().clear();
         existing.getPrescriptionItems().addAll(resolvePrescriptionItems(existing, details.getPrescriptionItems()));
@@ -102,6 +132,7 @@ public class MedicalServiceService {
         return applyPhotoFields(repository.save(existing));
     }
 
+    @Transactional(readOnly = true)
     public MedicalService getActiveByIdForBooking(Integer id) {
         MedicalService service = getById(id);
         if (!Boolean.TRUE.equals(service.getActive())) {
@@ -160,20 +191,85 @@ public class MedicalServiceService {
         if (medicalService.getPrice() == null || medicalService.getPrice() < 0) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Gia tien goi dich vu phai lon hon hoac bang 0.");
         }
-        if (medicalService.getSpecialty() == null || medicalService.getSpecialty().getId() == null) {
+        if (resolveSpecialtyId(medicalService) == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Goi dich vu phai thuoc mot chuyen khoa.");
         }
     }
 
     private void attachReferences(MedicalService medicalService) {
-        medicalService.setSpecialty(resolveSpecialty(medicalService.getSpecialty()));
-        medicalService.setActive(medicalService.getActive() == null ? true : medicalService.getActive());
+        medicalService.setSpecialty(resolveSpecialty(medicalService));
+        medicalService.setAssignedDoctor(resolveAssignedDoctor(medicalService, medicalService.getSpecialty()));
+        medicalService.setActive(resolveActive(medicalService, true));
+        medicalService.setAdvertised(medicalService.getAdvertised() == null ? false : medicalService.getAdvertised());
         medicalService.setPrescriptionItems(resolvePrescriptionItems(medicalService, medicalService.getPrescriptionItems()));
     }
 
-    private Specialty resolveSpecialty(Specialty specialty) {
-        return specialtyRepository.findById(specialty.getId())
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay chuyen khoa ID: " + specialty.getId()));
+    private Boolean resolveActive(MedicalService medicalService, Boolean defaultValue) {
+        String status = normalizeText(medicalService.getStatus());
+        if (status != null) {
+            String normalizedStatus = status
+                    .toLowerCase()
+                    .replace(" ", "")
+                    .replace("_", "")
+                    .replace("-", "");
+            if (normalizedStatus.equals("active")
+                    || normalizedStatus.equals("hoatdong")
+                    || normalizedStatus.equals("hoạtđộng")) {
+                return true;
+            }
+            if (normalizedStatus.equals("inactive")
+                    || normalizedStatus.equals("disabled")
+                    || normalizedStatus.equals("stopped")
+                    || normalizedStatus.equals("dunghoatdong")
+                    || normalizedStatus.equals("dừnghoạtđộng")) {
+                return false;
+            }
+        }
+        return medicalService.getActive() == null ? defaultValue : medicalService.getActive();
+    }
+
+    private Specialty resolveSpecialty(MedicalService medicalService) {
+        Integer specialtyId = resolveSpecialtyId(medicalService);
+        return specialtyRepository.findById(specialtyId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay chuyen khoa ID: " + specialtyId));
+    }
+
+    private Doctor resolveAssignedDoctor(MedicalService medicalService, Specialty specialty) {
+        Integer doctorId = resolveAssignedDoctorId(medicalService);
+        if (doctorId == null) {
+            return null;
+        }
+
+        Doctor doctor = doctorRepository.findById(doctorId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + doctorId));
+
+        Integer specialtyId = specialty == null ? null : specialty.getId();
+        Integer doctorSpecialtyId = doctor.getSpecialty() == null ? null : doctor.getSpecialty().getId();
+        if (specialtyId == null || doctorSpecialtyId == null || !specialtyId.equals(doctorSpecialtyId)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si dam nhan phai thuoc chuyen khoa cua goi dich vu.");
+        }
+
+        return doctor;
+    }
+
+    private Integer resolveSpecialtyId(MedicalService medicalService) {
+        if (medicalService == null) {
+            return null;
+        }
+        if (medicalService.getSpecialty() != null && medicalService.getSpecialty().getId() != null) {
+            return medicalService.getSpecialty().getId();
+        }
+        return medicalService.getSpecialtyId();
+    }
+
+    private Integer resolveAssignedDoctorId(MedicalService medicalService) {
+        if (medicalService == null) {
+            return null;
+        }
+        if (medicalService.getAssignedDoctor() != null && medicalService.getAssignedDoctor().getId() != null) {
+            return medicalService.getAssignedDoctor().getId();
+        }
+        return medicalService.getAssignedDoctorId();
     }
 
     private List<MedicalServicePrescriptionItem> resolvePrescriptionItems(
@@ -186,17 +282,18 @@ public class MedicalServiceService {
         }
 
         for (MedicalServicePrescriptionItem item : requestedItems) {
-            if (item.getMedicine() == null || item.getMedicine().getId() == null) {
+            Integer medicineId = resolveMedicineId(item);
+            if (medicineId == null) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "Thuoc trong don mau phai co medicineId.");
             }
             if (item.getQuantity() == null || item.getQuantity() <= 0) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "So luong thuoc trong don mau phai lon hon 0.");
             }
 
-            Medicine medicine = medicineRepository.findById(item.getMedicine().getId())
+            Medicine medicine = medicineRepository.findById(medicineId)
                     .orElseThrow(() -> new BusinessException(
                             HttpStatus.NOT_FOUND,
-                            "Khong tim thay thuoc ID: " + item.getMedicine().getId()
+                            "Khong tim thay thuoc ID: " + medicineId
                     ));
 
             MedicalServicePrescriptionItem resolvedItem = new MedicalServicePrescriptionItem();
@@ -208,6 +305,16 @@ public class MedicalServiceService {
         }
 
         return resolvedItems;
+    }
+
+    private Integer resolveMedicineId(MedicalServicePrescriptionItem item) {
+        if (item == null) {
+            return null;
+        }
+        if (item.getMedicine() != null && item.getMedicine().getId() != null) {
+            return item.getMedicine().getId();
+        }
+        return item.getMedicineId();
     }
 
     private void validatePhoto(MultipartFile file) {
@@ -238,10 +345,13 @@ public class MedicalServiceService {
             return medicalService;
         }
 
-        if (photoRepository.existsByMedicalServiceId(medicalService.getId())) {
+        if (photoRepository.findIdByMedicalServiceId(medicalService.getId()).isPresent()) {
             medicalService.setImageUrl("/api/medical-services/" + medicalService.getId() + "/photo");
         } else {
             medicalService.setImageUrl(null);
+        }
+        if (medicalService.getPrescriptionItems() != null) {
+            medicalService.getPrescriptionItems().size();
         }
         return medicalService;
     }

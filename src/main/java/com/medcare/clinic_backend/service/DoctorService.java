@@ -3,11 +3,13 @@ package com.medcare.clinic_backend.service;
 import com.medcare.clinic_backend.entity.Account;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.DoctorPhoto;
+import com.medcare.clinic_backend.entity.Specialty;
 import com.medcare.clinic_backend.dto.DoctorResponse;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AccountRepository;
 import com.medcare.clinic_backend.repository.DoctorPhotoRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
+import com.medcare.clinic_backend.repository.SpecialtyRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -33,6 +35,9 @@ public class DoctorService {
 
     @Autowired
     private AccountRepository accountRepository;
+
+    @Autowired
+    private SpecialtyRepository specialtyRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -109,7 +114,9 @@ public class DoctorService {
     @Transactional
     public Doctor createDoctor(Doctor doctor) {
         validateDoctorInput(doctor);
-        Account resolvedAccount = resolveAccountForCreate(doctor.getAccount());
+        validateDoctorEmailAvailable(doctor.getEmail(), null);
+        doctor.setSpecialty(resolveSpecialty(doctor));
+        Account resolvedAccount = resolveAccountForCreate(doctor);
         doctor.setAccount(resolvedAccount);
         doctor.setRating(resolveRatingForCreate(doctor.getRating()));
         doctor.setExperienceYears(resolveExperienceYearsForCreate(doctor.getExperienceYears()));
@@ -213,6 +220,7 @@ public class DoctorService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + id));
 
         validateDoctorInput(doctorDetails);
+        validateDoctorEmailAvailable(doctorDetails.getEmail(), id);
 
         doctor.setFullName(doctorDetails.getFullName());
         doctor.setEmail(doctorDetails.getEmail());
@@ -223,8 +231,8 @@ public class DoctorService {
                 doctorDetails.getExperienceYears(),
                 doctor.getExperienceYears()
         ));
-        doctor.setSpecialty(doctorDetails.getSpecialty());
-        doctor.setAccount(resolveAccountForUpdate(doctorDetails.getAccount(), doctor.getAccount()));
+        doctor.setSpecialty(resolveSpecialty(doctorDetails));
+        doctor.setAccount(resolveAccountForUpdate(doctorDetails, doctor.getAccount()));
         return doctorRepository.save(doctor);
     }
 
@@ -262,9 +270,39 @@ public class DoctorService {
         if (experienceYears != null && experienceYears < 0) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "So nam kinh nghiem khong duoc am.");
         }
-        if (doctor.getSpecialty() == null || doctor.getSpecialty().getId() == null) {
+        if (resolveSpecialtyId(doctor) == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si phai thuoc mot chuyen khoa.");
         }
+    }
+
+    private void validateDoctorEmailAvailable(String email, Integer currentDoctorId) {
+        String normalizedEmail = normalizeText(email);
+        if (normalizedEmail == null) {
+            return;
+        }
+
+        boolean exists = currentDoctorId == null
+                ? doctorRepository.existsByEmail(normalizedEmail)
+                : doctorRepository.existsByEmailAndIdNot(normalizedEmail, currentDoctorId);
+        if (exists) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email bac si da ton tai.");
+        }
+    }
+
+    private Specialty resolveSpecialty(Doctor doctor) {
+        Integer specialtyId = resolveSpecialtyId(doctor);
+        return specialtyRepository.findById(specialtyId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay chuyen khoa ID: " + specialtyId));
+    }
+
+    private Integer resolveSpecialtyId(Doctor doctor) {
+        if (doctor == null) {
+            return null;
+        }
+        if (doctor.getSpecialty() != null && doctor.getSpecialty().getId() != null) {
+            return doctor.getSpecialty().getId();
+        }
+        return doctor.getSpecialtyId();
     }
 
     private Double resolveRatingForCreate(Double requestedRating) {
@@ -289,9 +327,12 @@ public class DoctorService {
         return currentExperienceYears == null ? 0 : currentExperienceYears;
     }
 
-    private Account resolveAccountForCreate(Account inputAccount) {
+    private Account resolveAccountForCreate(Doctor doctor) {
+        Account inputAccount = doctor.getAccount();
         if (inputAccount == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Vui long cung cap account cho bac si moi.");
+            inputAccount = new Account();
+            inputAccount.setUsername(doctor.getUsername());
+            inputAccount.setPassword(doctor.getPassword());
         }
 
         if (inputAccount.getId() != null) {
@@ -321,9 +362,17 @@ public class DoctorService {
         return accountRepository.save(newAccount);
     }
 
-    private Account resolveAccountForUpdate(Account requestedAccount, Account currentAccount) {
+    private Account resolveAccountForUpdate(Doctor doctorDetails, Account currentAccount) {
+        Account requestedAccount = doctorDetails.getAccount();
         if (requestedAccount == null) {
-            return currentAccount;
+            String username = normalizeText(doctorDetails.getUsername());
+            String rawPassword = doctorDetails.getPassword();
+            if (username == null && (rawPassword == null || rawPassword.isBlank())) {
+                return currentAccount;
+            }
+            requestedAccount = new Account();
+            requestedAccount.setUsername(username);
+            requestedAccount.setPassword(rawPassword);
         }
 
         if (requestedAccount.getId() != null) {
@@ -421,8 +470,8 @@ public class DoctorService {
             return;
         }
 
-        DoctorPhoto photo = doctorPhotoRepository.findByDoctorId(doctor.getId()).orElse(null);
-        if (photo == null || photo.getId() == null) {
+        Integer photoId = doctorPhotoRepository.findIdByDoctorId(doctor.getId()).orElse(null);
+        if (photoId == null) {
             response.setPhotoId(null);
             response.setPhotoUrl(null);
             response.setImageUrl(null);
@@ -430,7 +479,7 @@ public class DoctorService {
         }
 
         String photoUrl = "/api/doctors/" + doctor.getId() + "/photo";
-        response.setPhotoId(photo.getId());
+        response.setPhotoId(photoId);
         response.setPhotoUrl(photoUrl);
         response.setImageUrl(photoUrl);
     }

@@ -26,7 +26,7 @@ public class DoctorController {
     private DoctorService doctorService;
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("permitAll()")
     public List<DoctorResponse> getAll(
             @RequestParam(required = false) Integer specialtyId,
             @RequestParam(required = false) String name
@@ -35,7 +35,7 @@ public class DoctorController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("permitAll()")
     public DoctorResponse getById(@PathVariable Integer id) {
         return doctorService.getDoctorResponseById(id);
     }

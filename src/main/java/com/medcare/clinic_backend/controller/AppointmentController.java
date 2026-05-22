@@ -53,7 +53,7 @@ public class AppointmentController {
     }
 
     @GetMapping("/booking-rules")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("permitAll()")
     public BookingRulesDto getBookingRules() {
         return appointmentService.getBookingRules();
     }
@@ -76,13 +76,23 @@ public class AppointmentController {
     }
 
     @GetMapping("/doctor/{doctorId}/slots")
-    @PreAuthorize("hasAnyAuthority('ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("permitAll()")
     public List<SlotAvailabilityDto> getDoctorSlotStatus(
             @PathVariable Integer doctorId,
             @RequestParam("date") String rawDate
     ) {
         LocalDate date = parseDateQuery(rawDate);
         return appointmentService.getDoctorSlotStatus(doctorId, date);
+    }
+
+    @GetMapping("/medical-service/{serviceId}/slots")
+    @PreAuthorize("permitAll()")
+    public List<SlotAvailabilityDto> getMedicalServiceSlotStatus(
+            @PathVariable Integer serviceId,
+            @RequestParam("date") String rawDate
+    ) {
+        LocalDate date = parseDateQuery(rawDate);
+        return appointmentService.getMedicalServiceSlotStatus(serviceId, date);
     }
 
     @PostMapping
@@ -182,7 +192,8 @@ public class AppointmentController {
         String normalized = rawDate.trim();
         List<DateTimeFormatter> acceptedFormatters = List.of(
                 DateTimeFormatter.ISO_LOCAL_DATE,
-                DateTimeFormatter.ofPattern("dd/MM/yyyy")
+                DateTimeFormatter.ofPattern("d/M/yyyy"),
+                DateTimeFormatter.ofPattern("yyyy-M-d")
         );
 
         for (DateTimeFormatter formatter : acceptedFormatters) {
@@ -195,7 +206,7 @@ public class AppointmentController {
 
         throw new BusinessException(
                 HttpStatus.BAD_REQUEST,
-                "Ngay khong hop le. Dinh dang ho tro: YYYY-MM-DD hoac DD/MM/YYYY."
+                "Ngay khong hop le. Dinh dang ho tro: YYYY-MM-DD hoac D/M/YYYY."
         );
     }
 }

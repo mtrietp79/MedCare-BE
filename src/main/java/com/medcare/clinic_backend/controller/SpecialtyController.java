@@ -16,13 +16,13 @@ public class SpecialtyController {
     private SpecialtyService specialtyService;
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("permitAll()")
     public List<Specialty> getAll() {
         return specialtyService.getAllSpecialties();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("permitAll()")
     public Specialty getById(@PathVariable Integer id) {
         return specialtyService.getSpecialtyById(id);
     }

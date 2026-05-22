@@ -300,11 +300,13 @@ Do not show this form on home or as a global login guard.
 
 ### `GET /api/appointments/doctor/{doctorId}/slots?date=YYYY-MM-DD`
 
-- Role: `ROLE_DOCTOR` or `ROLE_PATIENT`
+- Public.
 
 - Example:
 
 `/api/appointments/doctor/5/slots?date=2026-04-23`
+
+Also accepts non-padded dates like `23/5/2026`.
 
 - Response item example:
 
@@ -323,6 +325,19 @@ Do not show this form on home or as a global login guard.
 - FE rule:
   - If `full = true`: slot is full
   - If `disabled = true`: disable click
+
+### `GET /api/appointments/medical-service/{serviceId}/slots?date=YYYY-MM-DD`
+
+- Public.
+- Purpose: slot status when user books directly from a service package.
+- If the service package has `assignedDoctor`, backend checks that doctor only.
+- If the service package has no assigned doctor, backend checks all doctors in the service specialty and marks a slot available when at least one doctor still has capacity.
+
+Example:
+
+`/api/appointments/medical-service/3/slots?date=2026-04-23`
+
+Response item shape is the same as doctor slot API.
 
 ### `POST /api/appointments`
 
@@ -353,9 +368,22 @@ FE should handle `PROFILE_INCOMPLETE` only inside the booking flow by returning 
 }
 ```
 
+Booking from services page can omit doctor:
+
+```json
+{
+  "medicalService": { "id": 3 },
+  "appointmentDate": "2026-04-23T08:00:00",
+  "symptoms": "Can tu van goi dich vu"
+}
+```
+
 - `medicalService` is optional.
 - If omitted/null, appointment is a normal consultation and FE should display service as `Kham benh`.
 - If provided, backend validates that the service is active and belongs to the selected specialty.
+- If booking from the services page, FE can send `medicalService.id` and `appointmentDate`; `doctor` can be omitted.
+- If the service has `assignedDoctor`, backend uses that doctor and rejects a different requested doctor.
+- If the service has no assigned doctor, backend randomly selects an available doctor in the service specialty for the selected slot.
 - When `medicalService` is selected, `consultationFee` is set from the service package price.
 
 - Example success response:
@@ -379,12 +407,16 @@ FE should handle `PROFILE_INCOMPLETE` only inside the booking flow by returning 
     "id": 3,
     "name": "Dich vu xet nghiem mau",
     "price": 450000.0,
-    "active": true
+    "active": true,
+    "assignedDoctor": {
+      "id": 5,
+      "fullName": "Bac si Nguyen Van A"
+    }
   },
   "appointmentDate": "2026-04-23T08:00:00",
   "status": "PENDING",
   "symptoms": "Ho, sot",
-  "consultationFee": 300000.0,
+  "consultationFee": 450000.0,
   "paymentStatus": "UNPAID",
   "notes": null
 }
@@ -505,6 +537,7 @@ FE rule:
 ### `PUT /api/doctors/{id}`
 
 - Role: `ROLE_ADMIN`
+- Admin can set/update personal doctor consultation price with field `price`.
 
 ### `PUT /api/doctors/{id}/photo`
 
@@ -625,13 +658,18 @@ FE rule:
 ### `GET /api/medical-services`
 
 - Public.
-- Purpose: service package list for `services` tab/page, booking specialty step, and home ads.
+- Purpose: service package list for `services` tab/page and home ads.
 - Query optional:
   - `specialtyId`: only active services of selected specialty.
+  - `q` or `search`: search active service packages by name, case-insensitive.
 
 Example:
 
 `GET /api/medical-services?specialtyId=1`
+
+Search example:
+
+`GET /api/medical-services?q=xet%20nghiem`
 
 Response item example:
 
@@ -643,9 +681,19 @@ Response item example:
   "price": 450000.0,
   "imageUrl": "/api/medical-services/3/photo",
   "active": true,
+  "advertised": false,
   "specialty": {
     "id": 1,
     "name": "Noi tong quat"
+  },
+  "assignedDoctor": {
+    "id": 5,
+    "fullName": "Bac si Nguyen Van A",
+    "price": 300000,
+    "specialty": {
+      "id": 1,
+      "name": "Noi tong quat"
+    }
   },
   "prescriptionItems": [
     {
@@ -663,8 +711,10 @@ Response item example:
 
 Notes:
 - `imageUrl` is returned by backend when the service has a photo in database.
+- `assignedDoctor` can be null. Null means backend will randomly choose an available doctor in the service specialty at booking time.
 - `prescriptionItems` can be empty. Empty means doctor will prescribe after examination.
-- FE booking flow: after user chooses specialty, call `GET /api/medical-services?specialtyId=<id>` and show service package as optional selection.
+- FE services page: add a search input and call `GET /api/medical-services?q=<keyword>`. If a specialty filter is active, call `GET /api/medical-services?specialtyId=<id>&q=<keyword>`.
+- FE booking flow: remove service package selection from the specialty step. Service packages are booked from the services page/detail page.
 
 ### `GET /api/medical-services/{id}`
 
@@ -676,6 +726,7 @@ Notes:
 - Returns all service packages, including inactive/stopped packages.
 - Query optional:
   - `specialtyId`
+  - `q` or `search`: search all service packages by name, including inactive packages.
 
 ### `POST /api/medical-services`
 
@@ -690,9 +741,12 @@ Example request:
   "price": 600000,
   "active": true,
   "specialty": { "id": 1 },
+  "assignedDoctor": { "id": 5 },
   "prescriptionItems": []
 }
 ```
+
+You may send `assignedDoctorId: 5` instead of nested `assignedDoctor`.
 
 Example with predefined medicines:
 
@@ -702,6 +756,7 @@ Example with predefined medicines:
   "description": "Goi xet nghiem va tu van sau ket qua.",
   "price": 450000,
   "specialty": { "id": 1 },
+  "assignedDoctor": null,
   "prescriptionItems": [
     {
       "medicine": { "id": 2 },
@@ -805,6 +860,25 @@ FE page suggestions:
 
 - Creates VNPay checkout URL.
 - Amount is resolved from backend by appointment consultation fee (client cannot override).
+
+### `PATCH /api/payment/pay-at-clinic?appointmentId=<id>`
+
+- Role: `ROLE_PATIENT`
+- Purpose: patient chooses to pay at the clinic instead of VNPay.
+- Only the owner patient can update their appointment.
+- Backend sets:
+
+```json
+{
+  "paymentStatus": "PAY_AT_CLINIC"
+}
+```
+
+- FE rule:
+  - Add button `Thanh toán tại phòng khám` beside `Thanh toán VNPay`.
+  - On click, call this endpoint.
+  - After success, refresh appointment detail/history and show payment label as `Thanh toán tại phòng khám`.
+  - Hide/disable VNPay payment button when `paymentStatus = PAY_AT_CLINIC`, `PAID_ONLINE`, or `PAID`.
 
 ### `GET /api/payment/vnpay-return?...&appointmentId=<id>`
 

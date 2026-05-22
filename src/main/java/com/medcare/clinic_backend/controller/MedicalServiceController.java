@@ -21,8 +21,12 @@ public class MedicalServiceController {
 
     @GetMapping
     @PreAuthorize("permitAll()")
-    public List<MedicalService> getActive(@RequestParam(required = false) Integer specialtyId) {
-        return service.getActiveServices(specialtyId);
+    public List<MedicalService> getActive(
+            @RequestParam(required = false) Integer specialtyId,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String search
+    ) {
+        return service.getActiveServices(specialtyId, firstNonBlank(q, search));
     }
 
     @GetMapping("/{id}")
@@ -33,8 +37,12 @@ public class MedicalServiceController {
 
     @GetMapping("/admin")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public List<MedicalService> getAllForAdmin(@RequestParam(required = false) Integer specialtyId) {
-        return service.getAllForAdmin(specialtyId);
+    public List<MedicalService> getAllForAdmin(
+            @RequestParam(required = false) Integer specialtyId,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String search
+    ) {
+        return service.getAllForAdmin(specialtyId, firstNonBlank(q, search));
     }
 
     @PostMapping
@@ -74,5 +82,15 @@ public class MedicalServiceController {
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public MedicalService setActive(@PathVariable Integer id, @RequestParam boolean active) {
         return service.setActive(id, active);
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+        return null;
     }
 }

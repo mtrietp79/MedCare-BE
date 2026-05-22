@@ -10,7 +10,15 @@ import java.util.List;
 public interface MedicalServiceRepository extends JpaRepository<MedicalService, Integer> {
     List<MedicalService> findByActiveTrueOrderByIdDesc();
 
-    List<MedicalService> findBySpecialtyIdAndActiveTrueOrderByIdDesc(Integer specialtyId);
+    List<MedicalService> findBySpecialty_IdAndActiveTrueOrderByIdDesc(Integer specialtyId);
 
-    List<MedicalService> findBySpecialtyIdOrderByIdDesc(Integer specialtyId);
+    List<MedicalService> findBySpecialty_IdOrderByIdDesc(Integer specialtyId);
+
+    List<MedicalService> findByActiveTrueAndNameContainingIgnoreCaseOrderByIdDesc(String name);
+
+    List<MedicalService> findBySpecialty_IdAndActiveTrueAndNameContainingIgnoreCaseOrderByIdDesc(Integer specialtyId, String name);
+
+    List<MedicalService> findByNameContainingIgnoreCaseOrderByIdDesc(String name);
+
+    List<MedicalService> findBySpecialty_IdAndNameContainingIgnoreCaseOrderByIdDesc(Integer specialtyId, String name);
 }

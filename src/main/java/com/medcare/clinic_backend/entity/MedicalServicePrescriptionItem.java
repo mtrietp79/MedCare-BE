@@ -21,6 +21,9 @@ public class MedicalServicePrescriptionItem {
     @JoinColumn(name = "medicine_id", nullable = false)
     private Medicine medicine;
 
+    @Transient
+    private Integer medicineId;
+
     @Column(nullable = false)
     private Integer quantity = 1;
 
