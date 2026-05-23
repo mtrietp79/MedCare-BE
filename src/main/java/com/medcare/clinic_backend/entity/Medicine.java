@@ -3,6 +3,8 @@ package com.medcare.clinic_backend.entity;
 import jakarta.persistence.*;
 import lombok.Data;
 
+import java.time.LocalDate;
+
 @Data
 @Entity
 @Table(name = "medicines")
@@ -22,4 +24,22 @@ public class Medicine {
 
     @Column(columnDefinition = "TEXT")
     private String description;
+
+    @Column(name = "dosage")
+    private String dosage;
+
+    @Column(name = "quantity")
+    private Integer quantity = 0;
+
+    @Column(name = "category", length = 100)
+    private String category;
+
+    @Column(name = "manufacturer", length = 100)
+    private String manufacturer;
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
+
+    @Column(name = "status", length = 50)
+    private String status;
 }

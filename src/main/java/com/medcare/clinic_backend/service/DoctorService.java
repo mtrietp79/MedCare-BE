@@ -52,36 +52,52 @@ public class DoctorService {
     );
 
     public List<Doctor> getAllDoctors() {
-        return getAllDoctors(null);
+        return getAllDoctors(null, null, true);
     }
 
     public List<Doctor> getAllDoctors(Integer specialtyId) {
-        return getAllDoctors(specialtyId, null);
+        return getAllDoctors(specialtyId, null, true);
     }
 
     public List<Doctor> getAllDoctors(Integer specialtyId, String name) {
+        return getAllDoctors(specialtyId, name, true);
+    }
+
+    public List<Doctor> getAllDoctors(Integer specialtyId, String name, boolean includeInactive) {
         String normalizedName = normalizeText(name);
         if (specialtyId == null) {
             if (normalizedName == null) {
-                return doctorRepository.findAll();
+                return includeInactive ? doctorRepository.findAll() : doctorRepository.findAll().stream()
+                        .filter(doctor -> Boolean.TRUE.equals(doctor.getIsActive()))
+                        .toList();
             }
-            return doctorRepository.findByFullNameContainingIgnoreCase(normalizedName);
+            return includeInactive
+                    ? doctorRepository.findByFullNameContainingIgnoreCase(normalizedName)
+                    : doctorRepository.findByFullNameContainingIgnoreCaseAndIsActiveTrue(normalizedName);
         }
         if (specialtyId <= 0) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "specialtyId phai la so duong.");
         }
         if (normalizedName == null) {
-            return doctorRepository.findBySpecialty_Id(specialtyId);
+            return includeInactive
+                    ? doctorRepository.findBySpecialty_Id(specialtyId)
+                    : doctorRepository.findBySpecialty_IdAndIsActiveTrue(specialtyId);
         }
-        return doctorRepository.findBySpecialty_IdAndFullNameContainingIgnoreCase(specialtyId, normalizedName);
+        return includeInactive
+                ? doctorRepository.findBySpecialty_IdAndFullNameContainingIgnoreCase(specialtyId, normalizedName)
+                : doctorRepository.findBySpecialty_IdAndFullNameContainingIgnoreCaseAndIsActiveTrue(specialtyId, normalizedName);
     }
 
     public List<DoctorResponse> getAllDoctorResponses(Integer specialtyId) {
-        return getAllDoctorResponses(specialtyId, null);
+        return getAllDoctorResponses(specialtyId, null, true);
     }
 
     public List<DoctorResponse> getAllDoctorResponses(Integer specialtyId, String name) {
-        return getAllDoctors(specialtyId, name).stream()
+        return getAllDoctorResponses(specialtyId, name, true);
+    }
+
+    public List<DoctorResponse> getAllDoctorResponses(Integer specialtyId, String name, boolean includeInactive) {
+        return getAllDoctors(specialtyId, name, includeInactive).stream()
                 .map(this::toDoctorResponse)
                 .toList();
     }
@@ -119,7 +135,11 @@ public class DoctorService {
         Account resolvedAccount = resolveAccountForCreate(doctor);
         doctor.setAccount(resolvedAccount);
         doctor.setRating(resolveRatingForCreate(doctor.getRating()));
+        doctor.setIsActive(resolveIsActiveForCreate(doctor.getIsActive(), doctor.getStatus()));
         doctor.setExperienceYears(resolveExperienceYearsForCreate(doctor.getExperienceYears()));
+        if (doctor.getCreatedAt() == null) {
+            doctor.setCreatedAt(LocalDateTime.now());
+        }
         return doctorRepository.save(doctor);
     }
 
@@ -138,6 +158,8 @@ public class DoctorService {
         response.setPhone(safeText(doctor.getPhone()));
         response.setPrice(doctor.getPrice());
         response.setRating(doctor.getRating() == null ? 0.0 : doctor.getRating());
+        response.setActive(Boolean.TRUE.equals(doctor.getIsActive()));
+        response.setStatus(Boolean.TRUE.equals(doctor.getIsActive()) ? "ACTIVE" : "INACTIVE");
         int normalizedExperienceYears = doctor.getExperienceYears() == null ? 0 : doctor.getExperienceYears();
         response.setExperienceYears(normalizedExperienceYears);
         response.setExperience(normalizedExperienceYears);
@@ -227,6 +249,11 @@ public class DoctorService {
         doctor.setPhone(doctorDetails.getPhone());
         doctor.setPrice(doctorDetails.getPrice());
         doctor.setRating(resolveRatingForUpdate(doctorDetails.getRating(), doctor.getRating()));
+        doctor.setIsActive(resolveIsActiveForUpdate(
+                doctorDetails.getIsActive(),
+                doctorDetails.getStatus(),
+                doctor.getIsActive()
+        ));
         doctor.setExperienceYears(resolveExperienceYearsForUpdate(
                 doctorDetails.getExperienceYears(),
                 doctor.getExperienceYears()
@@ -241,6 +268,17 @@ public class DoctorService {
             throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + id);
         }
         doctorRepository.deleteById(id);
+    }
+
+    @Transactional
+    public Doctor updateDoctorActiveStatus(Integer id, Boolean active) {
+        if (active == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Trang thai active khong duoc de trong.");
+        }
+        Doctor doctor = doctorRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + id));
+        doctor.setIsActive(active);
+        return doctorRepository.save(doctor);
     }
 
     private void validateDoctorInput(Doctor doctor) {
@@ -313,6 +351,17 @@ public class DoctorService {
         return requestedExperienceYears == null ? 0 : requestedExperienceYears;
     }
 
+    private Boolean resolveIsActiveForCreate(Boolean requestedIsActive, String requestedStatus) {
+        if (requestedIsActive != null) {
+            return requestedIsActive;
+        }
+        Boolean parsedFromStatus = parseActiveFromStatus(requestedStatus);
+        if (parsedFromStatus != null) {
+            return parsedFromStatus;
+        }
+        return Boolean.TRUE;
+    }
+
     private Double resolveRatingForUpdate(Double requestedRating, Double currentRating) {
         if (requestedRating != null) {
             return requestedRating;
@@ -325,6 +374,35 @@ public class DoctorService {
             return requestedExperienceYears;
         }
         return currentExperienceYears == null ? 0 : currentExperienceYears;
+    }
+
+    private Boolean resolveIsActiveForUpdate(Boolean requestedIsActive, String requestedStatus, Boolean currentIsActive) {
+        if (requestedIsActive != null) {
+            return requestedIsActive;
+        }
+        Boolean parsedFromStatus = parseActiveFromStatus(requestedStatus);
+        if (parsedFromStatus != null) {
+            return parsedFromStatus;
+        }
+        return currentIsActive == null ? Boolean.TRUE : currentIsActive;
+    }
+
+    private Boolean parseActiveFromStatus(String status) {
+        String normalized = normalizeText(status);
+        if (normalized == null) {
+            return null;
+        }
+        String upper = normalized.toUpperCase();
+        if ("ACTIVE".equals(upper) || "HOAT_DONG".equals(upper) || "HOAT DONG".equals(upper)) {
+            return Boolean.TRUE;
+        }
+        if ("INACTIVE".equals(upper)
+                || "KHONG_HOAT_DONG".equals(upper)
+                || "KHONG HOAT DONG".equals(upper)
+                || "TAM_NGUNG".equals(upper)) {
+            return Boolean.FALSE;
+        }
+        return null;
     }
 
     private Account resolveAccountForCreate(Doctor doctor) {
@@ -441,6 +519,8 @@ public class DoctorService {
         }
 
         doctorPhotoRepository.save(photo);
+        doctor.setAvatarUrl("/api/doctors/" + doctor.getId() + "/photo");
+        doctorRepository.save(doctor);
         return doctor;
     }
 

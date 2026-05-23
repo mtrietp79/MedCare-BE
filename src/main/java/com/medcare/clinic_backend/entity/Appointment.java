@@ -34,8 +34,15 @@ public class Appointment {
     @JsonIgnoreProperties({"prescriptionItems"})
     private MedicalService medicalService;
 
+    @ManyToOne
+    @JoinColumn(name = "service_package_id")
+    private ServicePackage servicePackage;
+
     @Column(name = "appointment_date", nullable = false)
     private LocalDateTime appointmentDate;
+
+    @Column(length = 50)
+    private String type = "Khám bệnh";
 
     @Column(nullable = false, length = 50)
     private String status = "PENDING"; // PENDING, CONFIRMED, COMPLETED, CANCELLED
@@ -65,6 +72,9 @@ public class Appointment {
     }
 
     public String getServiceName() {
+        if (servicePackage != null) {
+            return safeText(servicePackage.getName());
+        }
         return medicalService == null ? "Kham benh" : safeText(medicalService.getName());
     }
 

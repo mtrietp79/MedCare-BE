@@ -11,19 +11,20 @@ public class PrescriptionDetail {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    // Nối với Hồ sơ bệnh án
     @ManyToOne
     @JoinColumn(name = "medical_record_id", nullable = false)
     private MedicalRecord medicalRecord;
 
-    // Nối với Thuốc
     @ManyToOne
     @JoinColumn(name = "medicine_id", nullable = false)
     private Medicine medicine;
 
     @Column(nullable = false)
-    private Integer quantity; // Số lượng (ví dụ: 10 viên)
+    private Integer quantity;
 
     @Column(length = 255)
-    private String dosage; // Cách dùng (ví dụ: Sáng 1, Tối 1 sau ăn)
+    private String dosage;
+
+    @Column(length = 255)
+    private String note;
 }

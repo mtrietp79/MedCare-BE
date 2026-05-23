@@ -1,11 +1,15 @@
 package com.medcare.clinic_backend.controller;
 
+import com.medcare.clinic_backend.dto.invoice.FinanceSummaryResponse;
+import com.medcare.clinic_backend.dto.invoice.InvoiceResponse;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.Invoice;
+import com.medcare.clinic_backend.entity.Patient;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.InvoiceRepository;
+import com.medcare.clinic_backend.repository.PatientRepository;
 import com.medcare.clinic_backend.service.DoctorService;
-import com.medcare.clinic_backend.service.InvoiceService;
+import com.medcare.clinic_backend.service.FinanceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,43 +24,116 @@ import java.util.List;
 public class InvoiceController {
 
     @Autowired
-    private InvoiceService invoiceService;
-
-    @Autowired
     private InvoiceRepository invoiceRepository;
 
     @Autowired
     private DoctorService doctorService;
 
+    @Autowired
+    private FinanceService financeService;
+
+    @Autowired
+    private PatientRepository patientRepository;
+
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
-    public List<Invoice> getAllInvoices() {
+    public List<InvoiceResponse> getAllInvoices(
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "keyword", required = false) String keyword
+    ) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (hasAuthority(authentication, "ROLE_DOCTOR") && !hasAuthority(authentication, "ROLE_ADMIN")) {
             Doctor currentDoctor = getCurrentDoctorOrThrow(authentication);
-            return invoiceService.getInvoicesForDoctor(currentDoctor.getId());
+            return financeService.getInvoiceResponsesForDoctor(currentDoctor.getId(), keyword, status);
         }
-        return invoiceRepository.findAll();
+        return financeService.getInvoiceResponsesForAdmin(keyword, status);
+    }
+
+    @GetMapping("/summary")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
+    public FinanceSummaryResponse getInvoiceSummary(
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "keyword", required = false) String keyword
+    ) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        List<InvoiceResponse> invoices;
+        if (hasAuthority(authentication, "ROLE_DOCTOR") && !hasAuthority(authentication, "ROLE_ADMIN")) {
+            Doctor currentDoctor = getCurrentDoctorOrThrow(authentication);
+            invoices = financeService.getInvoiceResponsesForDoctor(currentDoctor.getId(), keyword, status);
+        } else {
+            invoices = financeService.getInvoiceResponsesForAdmin(keyword, status);
+        }
+        return financeService.buildSummary(invoices);
     }
 
     @GetMapping("/record/{recordId}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
-    public Invoice getInvoiceByRecordId(@PathVariable Integer recordId) {
+    public InvoiceResponse getInvoiceByRecordId(@PathVariable Integer recordId) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (hasAuthority(authentication, "ROLE_DOCTOR") && !hasAuthority(authentication, "ROLE_ADMIN")) {
             Doctor currentDoctor = getCurrentDoctorOrThrow(authentication);
-            return invoiceService.getInvoiceByRecordIdForDoctor(recordId, currentDoctor.getId());
+            InvoiceResponse invoice = financeService.getInvoiceResponseByRecordId(recordId, currentDoctor.getId());
+            if (invoice == null) {
+                throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay hoa don cho ho so ID: " + recordId);
+            }
+            return invoice;
         }
-        return invoiceService.getInvoiceByRecordId(recordId);
+        InvoiceResponse invoice = financeService.getInvoiceResponseByRecordId(recordId, null);
+        if (invoice == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay hoa don cho ho so ID: " + recordId);
+        }
+        return invoice;
     }
 
     @PutMapping("/{id}/pay")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public Invoice payInvoice(@PathVariable Integer id) {
+    public InvoiceResponse payInvoice(@PathVariable Integer id) {
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay hoa don ID: " + id));
         invoice.setStatus("PAID");
-        return invoiceRepository.save(invoice);
+        invoiceRepository.save(invoice);
+        Integer recordId = invoice.getMedicalRecord() == null ? null : invoice.getMedicalRecord().getId();
+        if (recordId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Hoa don khong lien ket ho so benh an.");
+        }
+        InvoiceResponse response = financeService.getInvoiceResponseByRecordId(recordId, null);
+        if (response == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay hoa don cho ho so ID: " + recordId);
+        }
+        return response;
+    }
+
+    @GetMapping("/my")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public List<InvoiceResponse> getMyInvoices(
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "keyword", required = false) String keyword,
+            Authentication authentication
+    ) {
+        Patient currentPatient = getCurrentPatientOrThrow(authentication);
+        return financeService.getInvoiceResponsesForPatient(currentPatient.getId(), keyword, status);
+    }
+
+    @GetMapping("/my/{id}")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public InvoiceResponse getMyInvoiceById(@PathVariable Integer id, Authentication authentication) {
+        Patient currentPatient = getCurrentPatientOrThrow(authentication);
+        InvoiceResponse invoice = financeService.getInvoiceResponseByIdForPatient(id, currentPatient.getId());
+        if (invoice == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay hoa don ID: " + id);
+        }
+        return invoice;
+    }
+
+    @GetMapping("/my/record/{recordId}")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public InvoiceResponse getMyInvoiceByRecordId(@PathVariable Integer recordId, Authentication authentication) {
+        Patient currentPatient = getCurrentPatientOrThrow(authentication);
+        InvoiceResponse invoice = financeService.getInvoiceResponseByRecordIdForPatient(recordId, currentPatient.getId());
+        if (invoice == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay hoa don cho ho so ID: " + recordId);
+        }
+        return invoice;
     }
 
     private boolean hasAuthority(Authentication authentication, String authority) {
@@ -70,5 +147,16 @@ public class InvoiceController {
             throw new BusinessException(HttpStatus.UNAUTHORIZED, "Khong xac dinh duoc nguoi dung hien tai.");
         }
         return doctorService.getDoctorByAccountUsername(authentication.getName());
+    }
+
+    private Patient getCurrentPatientOrThrow(Authentication authentication) {
+        if (authentication == null || authentication.getName() == null) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "Khong xac dinh duoc nguoi dung hien tai.");
+        }
+        return patientRepository.findByAccount_Username(authentication.getName())
+                .orElseThrow(() -> new BusinessException(
+                        HttpStatus.BAD_REQUEST,
+                        "Tai khoan cua ban chua duoc lien ket voi ho so benh nhan."
+                ));
     }
 }

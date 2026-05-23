@@ -36,7 +36,7 @@ public class AppointmentController {
     private DoctorRepository doctorRepository;
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
     public List<Appointment> getAll() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (hasAuthority(authentication, "ROLE_PATIENT") && !hasAuthority(authentication, "ROLE_DOCTOR")) {
@@ -59,7 +59,7 @@ public class AppointmentController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
     public Appointment getById(@PathVariable Integer id) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (hasAuthority(authentication, "ROLE_PATIENT") && !hasAuthority(authentication, "ROLE_DOCTOR")) {
@@ -113,7 +113,7 @@ public class AppointmentController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
     public Appointment update(@PathVariable Integer id, @RequestBody Appointment appointment) {
         if (appointment == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Du lieu cap nhat khong hop le.");
@@ -123,14 +123,21 @@ public class AppointmentController {
         if (hasAuthority(authentication, "ROLE_PATIENT") && !hasAuthority(authentication, "ROLE_DOCTOR")) {
             Patient currentPatient = getCurrentPatientOrThrow(authentication);
             appointmentService.getAppointmentByIdForPatient(id, currentPatient.getId());
+            if (hasNonCancelablePatientMutation(appointment)) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "Benh nhan khong duoc doi lich hen. Chi ho tro huy lich.");
+            }
             if (appointment.getStatus() != null
                     && !appointment.getStatus().isBlank()
                     && !"CANCELLED".equalsIgnoreCase(appointment.getStatus())) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "Benh nhan chi duoc doi trang thai sang CANCELLED.");
             }
+            if (appointment.getStatus() == null || appointment.getStatus().isBlank()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "Benh nhan chi duoc cap nhat status = CANCELLED.");
+            }
             if (appointment.getPaymentStatus() != null && !appointment.getPaymentStatus().isBlank()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "Benh nhan khong duoc cap nhat paymentStatus.");
             }
+            return appointmentService.cancelAppointmentByPatient(id, currentPatient.getId());
         }
         if (hasAuthority(authentication, "ROLE_DOCTOR")) {
             Doctor currentDoctor = getCurrentDoctorOrThrow(authentication);
@@ -139,8 +146,16 @@ public class AppointmentController {
         return appointmentService.updateAppointment(id, appointment);
     }
 
+    @PatchMapping("/{id}/cancel")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public Appointment cancelMyAppointment(@PathVariable Integer id) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Patient currentPatient = getCurrentPatientOrThrow(authentication);
+        return appointmentService.cancelAppointmentByPatient(id, currentPatient.getId());
+    }
+
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ROLE_DOCTOR', 'ROLE_PATIENT')")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
     public void delete(@PathVariable Integer id) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (hasAuthority(authentication, "ROLE_PATIENT") && !hasAuthority(authentication, "ROLE_DOCTOR")) {
@@ -208,5 +223,20 @@ public class AppointmentController {
                 HttpStatus.BAD_REQUEST,
                 "Ngay khong hop le. Dinh dang ho tro: YYYY-MM-DD hoac D/M/YYYY."
         );
+    }
+
+    private boolean hasNonCancelablePatientMutation(Appointment appointment) {
+        if (appointment == null) {
+            return false;
+        }
+        return appointment.getDoctor() != null
+                || appointment.getSpecialty() != null
+                || appointment.getMedicalService() != null
+                || appointment.getServicePackage() != null
+                || appointment.getAppointmentDate() != null
+                || appointment.getType() != null
+                || appointment.getSymptoms() != null
+                || appointment.getConsultationFee() != null
+                || appointment.getNotes() != null;
     }
 }

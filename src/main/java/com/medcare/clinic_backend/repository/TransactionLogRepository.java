@@ -8,4 +8,14 @@ import org.springframework.stereotype.Repository;
 public interface TransactionLogRepository extends JpaRepository<TransactionLog, Integer> {
 
     boolean existsByVnpTransactionNo(String vnpTransactionNo);
+
+    TransactionLog findTopByServicePackageBookingIdAndResponseCodeOrderByCreatedAtDesc(
+            Integer servicePackageBookingId,
+            String responseCode
+    );
+
+    TransactionLog findTopByInvoiceIdAndResponseCodeOrderByCreatedAtDesc(
+            Integer invoiceId,
+            String responseCode
+    );
 }

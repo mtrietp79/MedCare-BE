@@ -84,8 +84,10 @@ public class AuthController {
         SecurityContextHolder.getContext().setAuthentication(authentication);
         String username = authentication.getName();
         String role = resolveRole(authentication, username);
-        String jwt = tokenProvider.generateToken(username);
+        String jwt = tokenProvider.generateToken(username, role);
+        Integer id = authService.getAccountIdByUsername(username);
         return ResponseEntity.ok(new AuthResponse(
+                id,
                 jwt,
                 username,
                 resolveDisplayName(role, username),
@@ -161,7 +163,8 @@ public class AuthController {
     private AuthResponse buildAuthResponse(String username) {
         String role = authService.getRoleByUsername(username);
         return new AuthResponse(
-                tokenProvider.generateToken(username),
+                authService.getAccountIdByUsername(username),
+                tokenProvider.generateToken(username, role),
                 username,
                 resolveDisplayName(role, username),
                 role,

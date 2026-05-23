@@ -15,4 +15,10 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Integer> {
     Optional<Invoice> findByMedicalRecordIdAndMedicalRecordDoctorId(Integer recordId, Integer doctorId);
 
     List<Invoice> findByMedicalRecordDoctorIdOrderByCreatedAtDesc(Integer doctorId);
+
+    List<Invoice> findByMedicalRecordPatientIdOrderByCreatedAtDesc(Integer patientId);
+
+    Optional<Invoice> findByIdAndMedicalRecordPatientId(Integer id, Integer patientId);
+
+    Optional<Invoice> findByMedicalRecordIdAndMedicalRecordPatientId(Integer recordId, Integer patientId);
 }

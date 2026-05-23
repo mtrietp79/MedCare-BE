@@ -1,6 +1,8 @@
 package com.medcare.clinic_backend.dto;
 
 public class AuthResponse {
+    private Integer id;
+    private String token;
     private String accessToken;
     private String tokenType = "Bearer ";
     private String username;
@@ -9,17 +11,22 @@ public class AuthResponse {
     private Boolean profileCompleted;
 
     public AuthResponse(String accessToken) {
+        this.token = accessToken;
         this.accessToken = accessToken;
     }
 
-    public AuthResponse(String accessToken, String username, String displayName, String role) {
+    public AuthResponse(Integer id, String accessToken, String username, String displayName, String role) {
+        this.id = id;
+        this.token = accessToken;
         this.accessToken = accessToken;
         this.username = username;
         this.displayName = displayName;
         this.role = role;
     }
 
-    public AuthResponse(String accessToken, String username, String displayName, String role, Boolean profileCompleted) {
+    public AuthResponse(Integer id, String accessToken, String username, String displayName, String role, Boolean profileCompleted) {
+        this.id = id;
+        this.token = accessToken;
         this.accessToken = accessToken;
         this.username = username;
         this.displayName = displayName;
@@ -32,7 +39,25 @@ public class AuthResponse {
     }
 
     public void setAccessToken(String accessToken) {
+        this.token = accessToken;
         this.accessToken = accessToken;
+    }
+
+    public Integer getId() {
+        return id;
+    }
+
+    public void setId(Integer id) {
+        this.id = id;
+    }
+
+    public String getToken() {
+        return token;
+    }
+
+    public void setToken(String token) {
+        this.token = token;
+        this.accessToken = token;
     }
 
     public String getTokenType() {

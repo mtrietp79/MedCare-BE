@@ -1,27 +1,26 @@
 package com.medcare.clinic_backend.security;
 
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.security.Key;
 import java.nio.charset.StandardCharsets;
+import java.security.Key;
 import java.util.Date;
 
 @Component
 public class JwtTokenProvider {
 
-    // Khóa bí mật để ký JWT (Giống như con dấu chống làm giả của phòng khám)
-    // Cần ít nhất 256-bit (32 ký tự). Mình cấu hình mặc định luôn cho bạn dễ chạy.
     @Value("${jwt.secret}")
     private String jwtSecret;
 
-    // Thời gian sống của Token (Ví dụ: 24 giờ = 86400000 milliseconds)
     @Value("${jwt.expiration:86400000}")
     private long jwtExpirationDate;
 
-    // Hàm tạo "con dấu" từ Khóa bí mật
     private Key key() {
         if (jwtSecret == null || jwtSecret.isBlank()) {
             throw new IllegalStateException("JWT secret chua duoc cau hinh.");
@@ -29,40 +28,49 @@ public class JwtTokenProvider {
         return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
     }
 
-    // 1. In thẻ: Tạo Token khi đăng nhập thành công
     public String generateToken(String username) {
+        return generateToken(username, null);
+    }
+
+    public String generateToken(String username, String role) {
         Date currentDate = new Date();
         Date expireDate = new Date(currentDate.getTime() + jwtExpirationDate);
 
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .setSubject(username)
-                .setIssuedAt(new Date()) // Ngày tạo
-                .setExpiration(expireDate) // Ngày hết hạn
-                .signWith(key(), SignatureAlgorithm.HS256) // Đóng dấu bảo mật
+                .setIssuedAt(currentDate)
+                .setExpiration(expireDate);
+        if (role != null && !role.isBlank()) {
+            builder.claim("role", role.trim());
+        }
+
+        return builder
+                .signWith(key(), SignatureAlgorithm.HS256)
                 .compact();
     }
 
-    // 2. Đọc thẻ: Lấy Username từ Token
     public String getUsernameFromToken(String token) {
+        return parseClaims(token).getBody().getSubject();
+    }
+
+    public String getRoleFromToken(String token) {
+        Object role = parseClaims(token).getBody().get("role");
+        return role == null ? null : role.toString();
+    }
+
+    public boolean validateToken(String token) {
+        try {
+            parseClaims(token);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private Jws<Claims> parseClaims(String token) {
         return Jwts.parserBuilder()
                 .setSigningKey(key())
                 .build()
-                .parseClaimsJws(token)
-                .getBody()
-                .getSubject();
-    }
-
-    // 3. Kiểm tra thẻ: Xem thẻ có hợp lệ không
-    public boolean validateToken(String token) {
-        try {
-            Jwts.parserBuilder()
-                    .setSigningKey(key())
-                    .build()
-                    .parseClaimsJws(token);
-            return true;
-        } catch (Exception e) {
-            // Token bị làm giả, bị sửa đổi, hoặc đã hết hạn
-            return false;
-        }
+                .parseClaimsJws(token);
     }
 }

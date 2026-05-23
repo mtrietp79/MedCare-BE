@@ -12,6 +12,8 @@ public class DoctorResponse {
     private String phone;
     private BigDecimal price;
     private Double rating;
+    private Boolean active;
+    private String status;
     private Integer experienceYears;
     private Integer experience;
     private Integer photoId;
@@ -82,6 +84,22 @@ public class DoctorResponse {
 
     public void setRating(Double rating) {
         this.rating = rating;
+    }
+
+    public Boolean getActive() {
+        return active;
+    }
+
+    public void setActive(Boolean active) {
+        this.active = active;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
     }
 
     public Integer getExperienceYears() {

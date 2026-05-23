@@ -430,6 +430,12 @@ Booking from services page can omit doctor:
 ### `PUT /api/appointments/{id}`
 
 - Role: `ROLE_DOCTOR` or `ROLE_PATIENT`
+- Patient chi duoc cap nhat de huy lich (`status = CANCELLED`), khong duoc doi ngay gio/bac si.
+
+### `PATCH /api/appointments/{id}/cancel`
+
+- Role: `ROLE_PATIENT`
+- Dung endpoint nay cho nut `Huy lich kham` o FE patient.
 
 ### `DELETE /api/appointments/{id}`
 
@@ -623,6 +629,16 @@ FE rule:
 
 - Role: `ROLE_ADMIN` or `ROLE_DOCTOR`
 
+### `GET /api/medical-records/my`
+
+- Role: `ROLE_PATIENT`
+- Lay danh sach ho so benh an cua chinh patient dang dang nhap.
+
+### `GET /api/medical-records/my/{id}`
+
+- Role: `ROLE_PATIENT`
+- Lay chi tiet 1 ho so benh an cua chinh patient dang dang nhap.
+
 ### `GET /api/medical-records/patient/{patientId}`
 
 - Role: `ROLE_ADMIN` or `ROLE_DOCTOR`
@@ -814,6 +830,23 @@ FE page suggestions:
 
 - Role: `ROLE_ADMIN` or `ROLE_DOCTOR`
 
+### `GET /api/invoices/my`
+
+- Role: `ROLE_PATIENT`
+- Query optional:
+  - `status`
+  - `keyword`
+
+### `GET /api/invoices/my/{id}`
+
+- Role: `ROLE_PATIENT`
+- Lay chi tiet hoa don cua chinh patient.
+
+### `GET /api/invoices/my/record/{recordId}`
+
+- Role: `ROLE_PATIENT`
+- Lay hoa don theo ho so benh an cua chinh patient.
+
 ### `PUT /api/invoices/{id}/pay`
 
 - Role: `ROLE_ADMIN`
@@ -858,31 +891,35 @@ FE page suggestions:
 
 ### `GET /api/payment/create-url?appointmentId=<id>`
 
+- Role: `ROLE_PATIENT`
 - Creates VNPay checkout URL.
 - Amount is resolved from backend by appointment consultation fee (client cannot override).
+- Chi patient so huu lich hen moi tao duoc link thanh toan.
 
-### `PATCH /api/payment/pay-at-clinic?appointmentId=<id>`
+### `GET /api/payment/create-invoice-url?invoiceId=<id>`
 
 - Role: `ROLE_PATIENT`
-- Purpose: patient chooses to pay at the clinic instead of VNPay.
-- Only the owner patient can update their appointment.
-- Backend sets:
+- Purpose: patient thanh toan hoa don phat sinh sau kham qua VNPay.
+- Only the owner patient can tao link thanh toan hoa don.
+- Backend returns payment URL string:
 
 ```json
-{
-  "paymentStatus": "PAY_AT_CLINIC"
-}
+"https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?..."
 ```
 
 - FE rule:
-  - Add button `Thanh toán tại phòng khám` beside `Thanh toán VNPay`.
-  - On click, call this endpoint.
-  - After success, refresh appointment detail/history and show payment label as `Thanh toán tại phòng khám`.
-  - Hide/disable VNPay payment button when `paymentStatus = PAY_AT_CLINIC`, `PAID_ONLINE`, or `PAID`.
+  - Không hiển thị nút `Thanh toán tại phòng khám`.
+  - Hiển thị nút `Thanh toán VNPay` cho hóa đơn có `canPayOnline = true`.
+  - On click, call this endpoint và redirect sang VNPay URL backend trả về.
+  - Ẩn hoặc disable nút thanh toán khi hóa đơn đã `PAID`.
 
 ### `GET /api/payment/vnpay-return?...&appointmentId=<id>`
 
 - Public VNPay callback
+
+### `GET /api/payment/vnpay-return?...&invoiceId=<id>`
+
+- Public VNPay callback cho hoa don sau kham.
 
 ---
 

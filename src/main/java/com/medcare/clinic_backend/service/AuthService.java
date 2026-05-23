@@ -131,6 +131,12 @@ public class AuthService {
                 .orElse("ROLE_PATIENT");
     }
 
+    public Integer getAccountIdByUsername(String username) {
+        return accountRepository.findByUsername(username)
+                .map(Account::getId)
+                .orElse(null);
+    }
+
     @Transactional
     public Map<String, String> processForgotPassword(String username) {
         String normalizedUsername = resolveAccountUsernameForRecovery(username);

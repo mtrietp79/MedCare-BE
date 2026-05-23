@@ -14,7 +14,7 @@ public class Invoice {
     private Integer id;
 
     // Nối 1-1 với Hồ sơ bệnh án (1 lần khám sinh ra 1 hóa đơn phát sinh)
-    @OneToOne
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "medical_record_id", nullable = false)
     private MedicalRecord medicalRecord;
 

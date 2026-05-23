@@ -24,7 +24,7 @@ public class MedicalRecord {
     private Doctor doctor;
 
     // Kết quả của cuộc hẹn nào? (1 cuộc hẹn sinh ra 1 trang record)
-    @OneToOne
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "appointment_id", nullable = false, unique = true)
     private Appointment appointment;
 

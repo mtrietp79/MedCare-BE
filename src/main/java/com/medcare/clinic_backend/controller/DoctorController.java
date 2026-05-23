@@ -3,6 +3,7 @@ package com.medcare.clinic_backend.controller;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.DoctorPhoto;
 import com.medcare.clinic_backend.dto.DoctorResponse;
+import com.medcare.clinic_backend.dto.doctor.UpdateDoctorActiveStatusRequest;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.service.DoctorService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,9 +30,11 @@ public class DoctorController {
     @PreAuthorize("permitAll()")
     public List<DoctorResponse> getAll(
             @RequestParam(required = false) Integer specialtyId,
-            @RequestParam(required = false) String name
+            @RequestParam(required = false) String name,
+            Authentication authentication
     ) {
-        return doctorService.getAllDoctorResponses(specialtyId, name);
+        boolean includeInactive = hasAuthority(authentication, "ROLE_ADMIN");
+        return doctorService.getAllDoctorResponses(specialtyId, name, includeInactive);
     }
 
     @GetMapping("/{id}")
@@ -103,9 +106,49 @@ public class DoctorController {
         return doctorService.toDoctorResponse(doctorService.updateDoctor(id, doctor));
     }
 
+    @PatchMapping("/{id}/active-status")
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public DoctorResponse updateActiveStatus(
+            @PathVariable Integer id,
+            @RequestBody UpdateDoctorActiveStatusRequest request
+    ) {
+        Boolean active = resolveActiveValue(request);
+        return doctorService.toDoctorResponse(doctorService.updateDoctorActiveStatus(id, active));
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public void delete(@PathVariable Integer id) {
         doctorService.deleteDoctor(id);
+    }
+
+    private boolean hasAuthority(Authentication authentication, String authority) {
+        return authentication != null
+                && authentication.getAuthorities() != null
+                && authentication.getAuthorities().stream().anyMatch(a -> authority.equals(a.getAuthority()));
+    }
+
+    private Boolean resolveActiveValue(UpdateDoctorActiveStatusRequest request) {
+        if (request == null) {
+            return null;
+        }
+        if (request.getActive() != null) {
+            return request.getActive();
+        }
+        String status = request.getStatus();
+        if (status == null) {
+            return null;
+        }
+        String normalized = status.trim().toUpperCase();
+        if ("ACTIVE".equals(normalized) || "HOAT_DONG".equals(normalized) || "HOAT DONG".equals(normalized)) {
+            return Boolean.TRUE;
+        }
+        if ("INACTIVE".equals(normalized)
+                || "KHONG_HOAT_DONG".equals(normalized)
+                || "KHONG HOAT DONG".equals(normalized)
+                || "TAM_NGUNG".equals(normalized)) {
+            return Boolean.FALSE;
+        }
+        return null;
     }
 }

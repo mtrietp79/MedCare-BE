@@ -1,6 +1,6 @@
 package com.medcare.clinic_backend.controller;
 
-import com.medcare.clinic_backend.dto.TestimonialResponse;
+import com.medcare.clinic_backend.dto.feedback.WebsiteFeedbackPublicResponse;
 import com.medcare.clinic_backend.service.FeedbackService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,10 +17,7 @@ public class TestimonialController {
     private FeedbackService feedbackService;
 
     @GetMapping
-    public List<TestimonialResponse> getTestimonials() {
-        return feedbackService.getPublicTestimonials()
-                .stream()
-                .map(TestimonialResponse::new)
-                .toList();
+    public List<WebsiteFeedbackPublicResponse> getTestimonials() {
+        return feedbackService.getApprovedWebsiteFeedbacks();
     }
 }

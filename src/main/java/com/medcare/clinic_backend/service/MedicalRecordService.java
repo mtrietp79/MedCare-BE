@@ -43,6 +43,11 @@ public class MedicalRecordService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay ho so benh an ID: " + id));
     }
 
+    public MedicalRecord getRecordByIdForPatient(Integer id, Integer patientId) {
+        return medicalRecordRepository.findByIdAndPatientId(id, patientId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay ho so benh an ID: " + id));
+    }
+
     public List<MedicalRecord> getHistoryByPatientId(Integer patientId) {
         return medicalRecordRepository.findByPatientIdOrderByExaminationDateDesc(patientId);
     }

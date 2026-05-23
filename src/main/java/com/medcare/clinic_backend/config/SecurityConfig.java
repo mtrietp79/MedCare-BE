@@ -47,17 +47,32 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                        // Public APIs
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/public/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/specialties", "/api/specialties/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/doctors/public/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/medical-services/public/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/testimonials").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/feedbacks/doctor/*").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/specialties", "/api/specialties/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/doctors", "/api/doctors/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/doctors/*/feedbacks", "/api/doctors/*/rating-summary").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/medical-services/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/appointments/booking-rules").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/appointments/doctor/*/slots").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/appointments/medical-service/*/slots").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/doctors/*/photo").permitAll()
                         .requestMatchers("/api/payment/vnpay-return").permitAll()
+
+                        // Role-based protected APIs
+                        .requestMatchers("/api/admin/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/doctor/**").hasAuthority("ROLE_DOCTOR")
+                        .requestMatchers("/api/patient/**", "/api/user/**").hasAuthority("ROLE_PATIENT")
+                        .requestMatchers("/api/booking/**").hasAuthority("ROLE_PATIENT")
+                        .requestMatchers(HttpMethod.POST, "/api/appointments", "/api/appointments/book").hasAuthority("ROLE_PATIENT")
+                        .requestMatchers("/api/patients/me/**").hasAuthority("ROLE_PATIENT")
+
                         .requestMatchers(
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",

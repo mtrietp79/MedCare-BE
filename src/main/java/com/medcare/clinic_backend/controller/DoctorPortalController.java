@@ -1,80 +1,174 @@
 package com.medcare.clinic_backend.controller;
 
-import com.medcare.clinic_backend.dto.DoctorResponse;
-import com.medcare.clinic_backend.entity.Doctor;
+import com.medcare.clinic_backend.dto.doctor.*;
 import com.medcare.clinic_backend.exception.BusinessException;
-import com.medcare.clinic_backend.repository.AppointmentRepository;
-import com.medcare.clinic_backend.repository.DoctorRepository;
-import com.medcare.clinic_backend.service.DoctorService;
+import com.medcare.clinic_backend.service.DoctorPortalService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.util.HashMap;
-import java.util.Map;
+import java.time.format.DateTimeParseException;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/doctor")
+@PreAuthorize("hasAuthority('ROLE_DOCTOR')")
 public class DoctorPortalController {
 
     @Autowired
-    private DoctorService doctorService;
+    private DoctorPortalService doctorPortalService;
 
-    @Autowired
-    private DoctorRepository doctorRepository;
+    @GetMapping("/dashboard")
+    public DoctorDashboardResponse getDashboard(Authentication authentication) {
+        return doctorPortalService.getDashboard(getCurrentUsername(authentication));
+    }
 
-    @Autowired
-    private AppointmentRepository appointmentRepository;
+    @GetMapping("/appointments")
+    public List<DoctorAppointmentListItemResponse> getAppointments(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String date,
+            @RequestParam(required = false) String type,
+            Authentication authentication
+    ) {
+        return doctorPortalService.getAppointments(
+                getCurrentUsername(authentication),
+                keyword,
+                status,
+                parseDateOrNull(date),
+                type
+        );
+    }
+
+    @GetMapping("/appointments/{id}")
+    public DoctorAppointmentDetailResponse getAppointmentDetail(
+            @PathVariable Integer id,
+            Authentication authentication
+    ) {
+        return doctorPortalService.getAppointmentDetail(getCurrentUsername(authentication), id);
+    }
+
+    @PostMapping("/appointments/{appointmentId}/complete")
+    public CompleteAppointmentResponse completeAppointment(
+            @PathVariable Integer appointmentId,
+            @RequestBody CompleteAppointmentRequest request,
+            Authentication authentication
+    ) {
+        return doctorPortalService.completeAppointment(getCurrentUsername(authentication), appointmentId, request);
+    }
+
+    @GetMapping("/medicines")
+    public List<DoctorMedicineResponse> getMedicines(Authentication authentication) {
+        return doctorPortalService.getMedicinesForDoctor(getCurrentUsername(authentication));
+    }
+
+    @GetMapping("/medical-services")
+    public List<DoctorMedicalServiceResponse> getMedicalServices(Authentication authentication) {
+        return doctorPortalService.getMedicalServicesForDoctor(getCurrentUsername(authentication));
+    }
+
+    @GetMapping("/medical-records/summary")
+    public DoctorMedicalRecordsSummaryResponse getMedicalRecordSummary(Authentication authentication) {
+        return doctorPortalService.getMedicalRecordSummary(getCurrentUsername(authentication));
+    }
+
+    @GetMapping("/medical-records/patients")
+    public List<DoctorMedicalRecordPatientItemResponse> getMedicalRecordPatients(
+            @RequestParam(required = false) String keyword,
+            Authentication authentication
+    ) {
+        return doctorPortalService.getMedicalRecordPatients(getCurrentUsername(authentication), keyword);
+    }
+
+    @GetMapping("/medical-records/patients/{patientId}")
+    public DoctorPatientMedicalRecordsResponse getPatientMedicalRecords(
+            @PathVariable Integer patientId,
+            Authentication authentication
+    ) {
+        return doctorPortalService.getPatientMedicalRecords(getCurrentUsername(authentication), patientId);
+    }
+
+    @PostMapping("/medical-records/{recordId}/follow-up")
+    public CreateFollowUpResponse createFollowUp(
+            @PathVariable Integer recordId,
+            @RequestBody CreateFollowUpRequest request,
+            Authentication authentication
+    ) {
+        return doctorPortalService.createFollowUp(getCurrentUsername(authentication), recordId, request);
+    }
+
+    @GetMapping("/schedule/week")
+    public DoctorWeekScheduleResponse getWeekSchedule(
+            @RequestParam String startDate,
+            Authentication authentication
+    ) {
+        LocalDate parsedDate = parseRequiredDate(startDate, "startDate");
+        return doctorPortalService.getWeekSchedule(getCurrentUsername(authentication), parsedDate);
+    }
+
+    @GetMapping("/schedule/day")
+    public List<DoctorScheduleDayAppointmentResponse> getDaySchedule(
+            @RequestParam String date,
+            @RequestParam String period,
+            Authentication authentication
+    ) {
+        LocalDate parsedDate = parseRequiredDate(date, "date");
+        return doctorPortalService.getDaySchedule(getCurrentUsername(authentication), parsedDate, period);
+    }
 
     @GetMapping("/profile")
-    @PreAuthorize("hasAuthority('ROLE_DOCTOR')")
-    public DoctorResponse getProfile() {
-        return doctorService.getDoctorResponseByAccountUsername(getCurrentUsername());
+    public DoctorProfileResponse getProfile(Authentication authentication) {
+        return doctorPortalService.getProfile(getCurrentUsername(authentication));
     }
 
-    @GetMapping("/dashboard/stats")
-    @PreAuthorize("hasAuthority('ROLE_DOCTOR')")
-    public Map<String, Object> getDashboardStats() {
-        Doctor doctor = getCurrentDoctor();
-        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
-        LocalDateTime endOfDay = LocalDate.now().atTime(LocalTime.MAX);
-
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("doctorId", doctor.getId());
-        stats.put("totalAppointments", appointmentRepository.countByDoctorId(doctor.getId()));
-        stats.put("appointmentsToday", appointmentRepository.countByDoctorIdAndAppointmentDateBetween(
-                doctor.getId(),
-                startOfDay,
-                endOfDay
-        ));
-        stats.put("pendingAppointments", appointmentRepository.countByDoctorIdAndStatus(doctor.getId(), "PENDING"));
-        stats.put("confirmedAppointments", appointmentRepository.countByDoctorIdAndStatus(doctor.getId(), "CONFIRMED"));
-        stats.put("completedAppointments", appointmentRepository.countByDoctorIdAndStatus(doctor.getId(), "COMPLETED"));
-        stats.put("totalPatients", appointmentRepository.countDistinctPatientsByDoctorId(doctor.getId()));
-        return stats;
+    @PutMapping("/profile")
+    public DoctorProfileResponse updateProfile(
+            @RequestBody UpdateDoctorProfileRequest request,
+            Authentication authentication
+    ) {
+        return doctorPortalService.updateProfile(getCurrentUsername(authentication), request);
     }
 
-    private Doctor getCurrentDoctor() {
-        return doctorRepository.findByAccount_Username(getCurrentUsername())
-                .orElseThrow(() -> new BusinessException(
-                        HttpStatus.BAD_REQUEST,
-                        "Tai khoan doctor chua duoc lien ket voi ho so bac si."
-                ));
+    @PostMapping(value = "/profile/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public AvatarUploadResponse uploadAvatar(
+            @RequestParam("file") MultipartFile file,
+            Authentication authentication
+    ) {
+        return doctorPortalService.uploadProfileAvatar(getCurrentUsername(authentication), file);
     }
 
-    private String getCurrentUsername() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+    @DeleteMapping("/profile/avatar")
+    public AvatarUploadResponse deleteAvatar(Authentication authentication) {
+        return doctorPortalService.deleteProfileAvatar(getCurrentUsername(authentication));
+    }
+
+    private String getCurrentUsername(Authentication authentication) {
         if (authentication == null || authentication.getName() == null) {
             throw new BusinessException(HttpStatus.UNAUTHORIZED, "Khong xac dinh duoc nguoi dung hien tai.");
         }
         return authentication.getName();
+    }
+
+    private LocalDate parseDateOrNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return parseRequiredDate(value, "date");
+    }
+
+    private LocalDate parseRequiredDate(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu tham so '" + fieldName + "'.");
+        }
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (DateTimeParseException ex) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ngay khong hop le. Dinh dang dung: yyyy-MM-dd.");
+        }
     }
 }

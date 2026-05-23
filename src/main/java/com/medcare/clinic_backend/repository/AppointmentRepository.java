@@ -56,6 +56,20 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
 
     List<Appointment> findByDoctorIdOrderByAppointmentDateDesc(Integer doctorId);
 
+    List<Appointment> findByDoctorIdAndAppointmentDateBetweenOrderByAppointmentDateAsc(
+            Integer doctorId,
+            LocalDateTime start,
+            LocalDateTime end
+    );
+
+    List<Appointment> findByDoctorIdAndAppointmentDateBetweenOrderByAppointmentDateDesc(
+            Integer doctorId,
+            LocalDateTime start,
+            LocalDateTime end
+    );
+
+    List<Appointment> findByDoctorIdAndPatientIdOrderByAppointmentDateDesc(Integer doctorId, Integer patientId);
+
     Optional<Appointment> findByIdAndPatientId(Integer id, Integer patientId);
 
     Optional<Appointment> findByIdAndDoctorId(Integer id, Integer doctorId);
@@ -66,10 +80,44 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
     @Query("SELECT COUNT(DISTINCT a.patient.id) FROM Appointment a WHERE a.doctor.id = :doctorId")
     long countDistinctPatientsByDoctorId(@Param("doctorId") Integer doctorId);
 
+    @Query("SELECT COUNT(DISTINCT a.patient.id) FROM Appointment a " +
+            "WHERE a.doctor.id = :doctorId " +
+            "AND LOWER(COALESCE(a.type, '')) LIKE CONCAT('%', LOWER(:typeKeyword), '%')")
+    long countDistinctPatientsByDoctorIdAndTypeKeyword(@Param("doctorId") Integer doctorId, @Param("typeKeyword") String typeKeyword);
+
     boolean existsByDoctorIdAndPatientId(Integer doctorId, Integer patientId);
 
     boolean existsByAppointmentCode(String appointmentCode);
 
     @Query("SELECT SUM(a.consultationFee) FROM Appointment a WHERE a.status = 'COMPLETED'")
     Double calculateTotalRevenue();
+
+    @Query("SELECT COALESCE(SUM(a.consultationFee), 0) FROM Appointment a " +
+            "WHERE a.status = 'COMPLETED' " +
+            "AND a.appointmentDate >= :start AND a.appointmentDate < :end")
+    Double calculateRevenueBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @Query("SELECT COUNT(DISTINCT a.patient.id) FROM Appointment a WHERE a.status <> 'CANCELLED'")
+    Long countDistinctActivePatients();
+
+    @Query("SELECT COUNT(DISTINCT a.patient.id) FROM Appointment a " +
+            "WHERE a.status <> 'CANCELLED' " +
+            "AND a.appointmentDate >= :start AND a.appointmentDate < :end")
+    Long countDistinctPatientsBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @Query("SELECT COUNT(DISTINCT a.doctor.id) FROM Appointment a " +
+            "WHERE a.doctor IS NOT NULL " +
+            "AND a.status <> 'CANCELLED' " +
+            "AND a.appointmentDate >= :start AND a.appointmentDate < :end")
+    Long countDistinctDoctorsBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @Query("SELECT FUNCTION('MONTH', a.appointmentDate), COUNT(DISTINCT a.patient.id) " +
+            "FROM Appointment a " +
+            "WHERE FUNCTION('YEAR', a.appointmentDate) = :year " +
+            "AND a.status <> 'CANCELLED' " +
+            "GROUP BY FUNCTION('MONTH', a.appointmentDate) " +
+            "ORDER BY FUNCTION('MONTH', a.appointmentDate)")
+    List<Object[]> countDistinctPatientsByYearGroupedByMonth(@Param("year") Integer year);
+
+    List<Appointment> findTop10ByOrderByAppointmentDateDesc();
 }

@@ -38,6 +38,9 @@ public class Patient {
     @Column(name = "profile_completed")
     private Boolean profileCompleted = false;
 
+    @Column(name = "avatar_url", columnDefinition = "TEXT")
+    private String avatarUrl;
+
     @OneToOne
     @JoinColumn(name = "account_id", referencedColumnName = "id")
     private Account account;

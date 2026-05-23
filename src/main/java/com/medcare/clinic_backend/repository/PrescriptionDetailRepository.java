@@ -12,4 +12,6 @@ public interface PrescriptionDetailRepository extends JpaRepository<Prescription
     List<PrescriptionDetail> findByMedicalRecordId(Integer recordId);
 
     List<PrescriptionDetail> findByMedicalRecordIdAndMedicalRecordDoctorId(Integer recordId, Integer doctorId);
+
+    List<PrescriptionDetail> findByMedicalRecordIdIn(List<Integer> recordIds);
 }

@@ -34,13 +34,17 @@ public class SearchService {
         }
 
         List<Doctor> matchedDoctors = doctorRepository
-                .findByFullNameContainingIgnoreCaseOrSpecialty_NameContainingIgnoreCase(normalizedQuery, normalizedQuery);
+                .findByFullNameContainingIgnoreCaseOrSpecialty_NameContainingIgnoreCase(normalizedQuery, normalizedQuery)
+                .stream()
+                .filter(doctor -> doctor != null && Boolean.TRUE.equals(doctor.getIsActive()))
+                .toList();
         List<Specialty> matchedSpecialties = specialtyRepository
                 .findByNameContainingIgnoreCaseOrDescriptionContainingIgnoreCase(normalizedQuery, normalizedQuery);
 
         if (matchedDoctors.isEmpty() && matchedSpecialties.isEmpty()) {
             String foldedQuery = foldVietnameseText(normalizedQuery);
             matchedDoctors = doctorRepository.findAll().stream()
+                    .filter(doctor -> doctor != null && Boolean.TRUE.equals(doctor.getIsActive()))
                     .filter(doctor -> containsFolded(doctor == null ? null : doctor.getFullName(), foldedQuery)
                             || containsFolded(doctor == null || doctor.getSpecialty() == null ? null : doctor.getSpecialty().getName(), foldedQuery))
                     .toList();
@@ -101,7 +105,7 @@ public class SearchService {
             if (deduplicated.size() >= MAX_RESULTS_PER_GROUP) {
                 break;
             }
-            long totalDoctors = doctorRepository.countBySpecialty_Id(specialty.getId());
+            long totalDoctors = doctorRepository.countBySpecialty_IdAndIsActiveTrue(specialty.getId());
             deduplicated.putIfAbsent(
                     specialty.getId(),
                     new SearchResponse.SearchSpecialtyItem(

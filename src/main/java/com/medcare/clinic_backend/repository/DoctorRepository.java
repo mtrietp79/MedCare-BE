@@ -22,17 +22,32 @@ public interface DoctorRepository extends JpaRepository<Doctor, Integer> {
 
     List<Doctor> findBySpecialty_Id(Integer specialtyId);
 
+    List<Doctor> findBySpecialty_IdAndIsActiveTrue(Integer specialtyId);
+
     List<Doctor> findByFullNameContainingIgnoreCase(String name);
+
+    List<Doctor> findByFullNameContainingIgnoreCaseAndIsActiveTrue(String name);
 
     List<Doctor> findBySpecialty_IdAndFullNameContainingIgnoreCase(Integer specialtyId, String name);
 
+    List<Doctor> findBySpecialty_IdAndFullNameContainingIgnoreCaseAndIsActiveTrue(Integer specialtyId, String name);
+
     long countBySpecialty_Id(Integer specialtyId);
 
+    long countBySpecialty_IdAndIsActiveTrue(Integer specialtyId);
+
     List<Doctor> findByFullNameContainingIgnoreCaseOrSpecialty_NameContainingIgnoreCase(String fullNameKeyword, String specialtyKeyword);
+
+    List<Doctor> findByFullNameContainingIgnoreCaseOrSpecialty_NameContainingIgnoreCaseAndIsActiveTrue(
+            String fullNameKeyword,
+            String specialtyKeyword
+    );
 
     boolean existsByAccountId(Integer accountId);
 
     boolean existsByEmail(String email);
 
     boolean existsByEmailAndIdNot(String email, Integer id);
+
+    long countByIsActiveTrue();
 }
