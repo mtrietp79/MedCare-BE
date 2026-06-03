@@ -194,15 +194,32 @@ public class FeedbackService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay website feedback ID: " + id));
         String currentStatus = resolveWebsiteFeedbackStatus(feedback);
         if (WEBSITE_FEEDBACK_APPROVED.equals(currentStatus)) {
-            return new MessageResponse("Feedback da o trang thai APPROVED.");
+            return new MessageResponse("Feedback da duyet truoc do.");
         }
-        if (!WEBSITE_FEEDBACK_PENDING.equals(currentStatus) && !WEBSITE_FEEDBACK_HIDDEN.equals(currentStatus)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Chi co the duyet feedback o trang thai PENDING hoac HIDDEN.");
+        if (!WEBSITE_FEEDBACK_PENDING.equals(currentStatus)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Chi co the duyet feedback o trang thai PENDING.");
         }
         feedback.setStatus(WEBSITE_FEEDBACK_APPROVED);
         feedback.setIsApproved(true);
         websiteFeedbackRepository.save(feedback);
-        return new MessageResponse("Duyet feedback thanh cong");
+        return new MessageResponse("Da duyet feedback.");
+    }
+
+    @Transactional
+    public MessageResponse unhideWebsiteFeedback(Integer id) {
+        WebsiteFeedback feedback = websiteFeedbackRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay website feedback ID: " + id));
+        String currentStatus = resolveWebsiteFeedbackStatus(feedback);
+        if (WEBSITE_FEEDBACK_APPROVED.equals(currentStatus)) {
+            return new MessageResponse("Feedback dang hien thi san.");
+        }
+        if (!WEBSITE_FEEDBACK_HIDDEN.equals(currentStatus)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Chi co the bo an feedback o trang thai HIDDEN.");
+        }
+        feedback.setStatus(WEBSITE_FEEDBACK_APPROVED);
+        feedback.setIsApproved(true);
+        websiteFeedbackRepository.save(feedback);
+        return new MessageResponse("Da bo an feedback.");
     }
 
     @Transactional
@@ -211,12 +228,12 @@ public class FeedbackService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay website feedback ID: " + id));
         String currentStatus = resolveWebsiteFeedbackStatus(feedback);
         if (WEBSITE_FEEDBACK_HIDDEN.equals(currentStatus)) {
-            return new MessageResponse("Feedback da o trang thai HIDDEN.");
+            return new MessageResponse("Feedback da an truoc do.");
         }
         feedback.setStatus(WEBSITE_FEEDBACK_HIDDEN);
         feedback.setIsApproved(false);
         websiteFeedbackRepository.save(feedback);
-        return new MessageResponse("An feedback thanh cong");
+        return new MessageResponse("Da an feedback.");
     }
 
     @Transactional
@@ -225,7 +242,7 @@ public class FeedbackService {
             throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay website feedback ID: " + id);
         }
         websiteFeedbackRepository.deleteById(id);
-        return new MessageResponse("Xoa feedback thanh cong");
+        return new MessageResponse("Da xoa feedback.");
     }
 
     public void deleteFeedback(Integer id) {
@@ -305,6 +322,7 @@ public class FeedbackService {
     }
 
     private WebsiteFeedbackAdminResponse toWebsiteAdminResponse(WebsiteFeedback feedback) {
+        String status = resolveWebsiteFeedbackStatus(feedback);
         return new WebsiteFeedbackAdminResponse(
                 feedback.getId(),
                 feedback.getPatient() == null ? null : feedback.getPatient().getId(),
@@ -312,9 +330,42 @@ public class FeedbackService {
                 feedback.getEmail(),
                 feedback.getRating(),
                 feedback.getComment(),
-                resolveWebsiteFeedbackStatus(feedback),
+                status,
+                toWebsiteFeedbackStatusDisplay(status),
+                canApproveWebsiteFeedback(status),
+                canHideWebsiteFeedback(status),
+                canUnhideWebsiteFeedback(status),
+                true,
+                isVisibleOnHomepage(status),
                 feedback.getCreatedAt()
         );
+    }
+
+    private String toWebsiteFeedbackStatusDisplay(String status) {
+        if (status == null) {
+            return "Cho duyet";
+        }
+        return switch (status) {
+            case WEBSITE_FEEDBACK_APPROVED -> "Da duyet";
+            case WEBSITE_FEEDBACK_HIDDEN -> "Da an";
+            default -> "Cho duyet";
+        };
+    }
+
+    private boolean canApproveWebsiteFeedback(String status) {
+        return WEBSITE_FEEDBACK_PENDING.equals(status);
+    }
+
+    private boolean canHideWebsiteFeedback(String status) {
+        return !WEBSITE_FEEDBACK_HIDDEN.equals(status);
+    }
+
+    private boolean canUnhideWebsiteFeedback(String status) {
+        return WEBSITE_FEEDBACK_HIDDEN.equals(status);
+    }
+
+    private boolean isVisibleOnHomepage(String status) {
+        return WEBSITE_FEEDBACK_APPROVED.equals(status);
     }
 
     private String resolveWebsiteFeedbackStatus(WebsiteFeedback feedback) {

@@ -1,9 +1,9 @@
 package com.medcare.clinic_backend.controller;
 
-import com.medcare.clinic_backend.dto.AdminMedicineResponse;
 import com.medcare.clinic_backend.dto.AdminMedicineSummaryResponse;
+import com.medcare.clinic_backend.dto.MedicineRequest;
+import com.medcare.clinic_backend.dto.MedicineResponse;
 import com.medcare.clinic_backend.dto.MedicineQuantityUpdateRequest;
-import com.medcare.clinic_backend.entity.Medicine;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.service.MedicineService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,8 +22,18 @@ public class AdminMedicineController {
     private MedicineService medicineService;
 
     @GetMapping
-    public List<AdminMedicineResponse> getAllMedicines() {
-        return medicineService.getAllAdminMedicines();
+    public List<MedicineResponse> getAllMedicines(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer categoryId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String category
+    ) {
+        return medicineService.getAllAdminMedicines(keyword, categoryId, status, category);
+    }
+
+    @GetMapping("/categories")
+    public List<String> getCategories() {
+        return medicineService.getMedicineCategories();
     }
 
     @GetMapping("/summary")
@@ -32,13 +42,13 @@ public class AdminMedicineController {
     }
 
     @PostMapping
-    public Medicine createMedicine(@RequestBody Medicine medicine) {
-        return medicineService.createMedicine(medicine);
+    public MedicineResponse createMedicine(@RequestBody MedicineRequest request) {
+        return medicineService.createAdminMedicine(request);
     }
 
     @PutMapping("/{id}")
-    public Medicine updateMedicine(@PathVariable Integer id, @RequestBody Medicine medicine) {
-        return medicineService.updateMedicine(id, medicine);
+    public MedicineResponse updateMedicine(@PathVariable Integer id, @RequestBody MedicineRequest request) {
+        return medicineService.updateAdminMedicine(id, request);
     }
 
     @DeleteMapping("/{id}")
@@ -47,10 +57,10 @@ public class AdminMedicineController {
     }
 
     @PatchMapping("/{id}/quantity")
-    public Medicine updateQuantity(@PathVariable Integer id, @RequestBody MedicineQuantityUpdateRequest request) {
+    public MedicineResponse updateQuantity(@PathVariable Integer id, @RequestBody MedicineQuantityUpdateRequest request) {
         if (request == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Du lieu cap nhat so luong khong hop le.");
         }
-        return medicineService.updateMedicineQuantity(id, request.getQuantity());
+        return medicineService.updateAdminMedicineQuantity(id, request.getQuantity());
     }
 }

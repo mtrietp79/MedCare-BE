@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.config.VNPayConfig;
+import com.medcare.clinic_backend.dto.feedback.MessageResponse;
 import com.medcare.clinic_backend.dto.servicepackage.*;
 import com.medcare.clinic_backend.entity.*;
 import com.medcare.clinic_backend.exception.BusinessException;
@@ -66,9 +67,58 @@ public class ServicePackageService {
 
     @Transactional(readOnly = true)
     public List<AdminServicePackageResponse> getAllForAdmin() {
+        return getAllForAdmin(null, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AdminServicePackageResponse> getAllForAdmin(String keyword, Boolean active, Boolean configured) {
+        List<ServicePackageBooking> allBookings = servicePackageBookingRepository.findAll();
+        Map<Integer, PackageBookingStats> bookingStatsByPackageId = buildBookingStatsByPackageId(allBookings);
+        String normalizedKeyword = normalizeKeyword(keyword);
+
         return servicePackageRepository.findAll().stream()
-                .map(this::toAdminResponse)
+                .sorted(Comparator.comparing(ServicePackage::getId, Comparator.nullsLast(Comparator.reverseOrder())))
+                .filter(servicePackage -> matchesAdminPackageKeyword(servicePackage, normalizedKeyword))
+                .filter(servicePackage -> matchesAdminPackageActive(servicePackage, active))
+                .filter(servicePackage -> matchesAdminPackageConfigured(servicePackage, configured))
+                .map(servicePackage -> toAdminResponse(servicePackage, bookingStatsByPackageId))
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public AdminServicePackageSummaryResponse getAdminSummary() {
+        List<ServicePackage> packages = servicePackageRepository.findAll();
+        Map<Integer, PackageBookingStats> bookingStatsByPackageId =
+                buildBookingStatsByPackageId(servicePackageBookingRepository.findAll());
+
+        long totalPackages = packages.size();
+        long activePackages = packages.stream()
+                .filter(servicePackage -> Boolean.TRUE.equals(servicePackage.getIsActive()))
+                .count();
+        long inactivePackages = totalPackages - activePackages;
+        long packagesWithBookings = packages.stream()
+                .filter(servicePackage -> hasPackageBookings(servicePackage, bookingStatsByPackageId))
+                .count();
+        long packagesWithoutItems = packages.stream()
+                .filter(servicePackage -> countPackageItems(servicePackage) == 0)
+                .count();
+
+        return new AdminServicePackageSummaryResponse(
+                totalPackages,
+                activePackages,
+                inactivePackages,
+                packagesWithBookings,
+                packagesWithoutItems
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public AdminServicePackageResponse getByIdForAdmin(Integer id) {
+        ServicePackage servicePackage = servicePackageRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay goi dich vu ID: " + id));
+        Map<Integer, PackageBookingStats> bookingStatsByPackageId =
+                buildBookingStatsByPackageId(servicePackageBookingRepository.findAll());
+        return toAdminResponse(servicePackage, bookingStatsByPackageId);
     }
 
     @Transactional
@@ -76,7 +126,7 @@ public class ServicePackageService {
         ServicePackage servicePackage = new ServicePackage();
         applyRequest(servicePackage, request);
         ServicePackage saved = servicePackageRepository.save(servicePackage);
-        return toAdminResponse(saved);
+        return toAdminResponse(saved, Map.of());
     }
 
     @Transactional
@@ -85,15 +135,36 @@ public class ServicePackageService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay goi dich vu ID: " + id));
         applyRequest(servicePackage, request);
         ServicePackage saved = servicePackageRepository.save(servicePackage);
-        return toAdminResponse(saved);
+        return toAdminResponse(saved, Map.of());
     }
 
     @Transactional
-    public void deleteForAdmin(Integer id) {
+    public AdminServicePackageResponse setActiveForAdmin(Integer id, Boolean active) {
+        if (active == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "active khong duoc de trong.");
+        }
+        ServicePackage servicePackage = servicePackageRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay goi dich vu ID: " + id));
+        servicePackage.setIsActive(active);
+        ServicePackage saved = servicePackageRepository.save(servicePackage);
+        Map<Integer, PackageBookingStats> bookingStatsByPackageId =
+                buildBookingStatsByPackageId(servicePackageBookingRepository.findAll());
+        return toAdminResponse(saved, bookingStatsByPackageId);
+    }
+
+    @Transactional
+    public MessageResponse deleteForAdmin(Integer id) {
         if (!servicePackageRepository.existsById(id)) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay goi dich vu ID: " + id);
         }
+        if (servicePackageBookingRepository.existsByServicePackage_Id(id)) {
+            throw new BusinessException(
+                    HttpStatus.BAD_REQUEST,
+                    "Khong the xoa goi dich vu da co booking. Vui long chuyen sang tam ngung."
+            );
+        }
         servicePackageRepository.deleteById(id);
+        return new MessageResponse("Da xoa goi dich vu.");
     }
 
     @Transactional
@@ -155,7 +226,7 @@ public class ServicePackageService {
                 saved.getId(),
                 saved.getBookingCode(),
                 paymentUrl,
-                "Tao phieu dich vu thanh cong, vui long thanh toan"
+                "Tao dat goi dich vu thanh cong, vui long thanh toan"
         );
     }
 
@@ -182,7 +253,7 @@ public class ServicePackageService {
                 ));
 
         ServicePackageBooking booking = servicePackageBookingRepository.findByIdAndPatientId(bookingId, patient.getId())
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay phieu dich vu ID: " + bookingId));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay dat goi dich vu ID: " + bookingId));
 
         return toPatientBookingDetail(booking);
     }
@@ -211,7 +282,7 @@ public class ServicePackageService {
         }
 
         ServicePackageBooking booking = servicePackageBookingRepository.findById(bookingId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay phieu dich vu ID: " + bookingId));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay dat goi dich vu ID: " + bookingId));
 
         booking.setStatus(normalized);
 
@@ -253,7 +324,8 @@ public class ServicePackageService {
 
         List<ServicePackageItem> resolvedItems = new ArrayList<>();
         if (request.getMedicalServiceIds() != null) {
-            for (Integer medicalServiceId : request.getMedicalServiceIds()) {
+            Set<Integer> uniqueMedicalServiceIds = new LinkedHashSet<>(request.getMedicalServiceIds());
+            for (Integer medicalServiceId : uniqueMedicalServiceIds) {
                 if (medicalServiceId == null) {
                     continue;
                 }
@@ -307,8 +379,15 @@ public class ServicePackageService {
         );
     }
 
-    private AdminServicePackageResponse toAdminResponse(ServicePackage servicePackage) {
+    private AdminServicePackageResponse toAdminResponse(
+            ServicePackage servicePackage,
+            Map<Integer, PackageBookingStats> bookingStatsByPackageId
+    ) {
         PublicServicePackageDetailResponse detail = toPublicDetailResponse(servicePackage);
+        PackageBookingStats stats = bookingStatsByPackageId.getOrDefault(
+                servicePackage == null ? null : servicePackage.getId(),
+                PackageBookingStats.empty()
+        );
         return new AdminServicePackageResponse(
                 servicePackage.getId(),
                 servicePackage.getName(),
@@ -319,6 +398,15 @@ public class ServicePackageService {
                 servicePackage.getIsActive(),
                 servicePackage.getCreatedAt(),
                 servicePackage.getUpdatedAt(),
+                stats.totalBooked(),
+                stats.totalCompleted(),
+                stats.totalPaid(),
+                stats.totalPending(),
+                countPackageItems(servicePackage),
+                resolvePackageStatus(servicePackage),
+                resolvePackageStatusDisplay(servicePackage),
+                hasPackageBookings(servicePackage, bookingStatsByPackageId),
+                !hasPackageBookings(servicePackage, bookingStatsByPackageId),
                 detail.getItems()
         );
     }
@@ -428,8 +516,74 @@ public class ServicePackageService {
                 || packageName.contains(normalizedKeyword);
     }
 
+    private boolean matchesAdminPackageKeyword(ServicePackage servicePackage, String normalizedKeyword) {
+        if (normalizedKeyword == null) {
+            return true;
+        }
+        if (servicePackage == null) {
+            return false;
+        }
+        if (safeLower(servicePackage.getName()).contains(normalizedKeyword)
+                || safeLower(servicePackage.getDescription()).contains(normalizedKeyword)) {
+            return true;
+        }
+        return servicePackage.getItems() != null && servicePackage.getItems().stream()
+                .filter(Objects::nonNull)
+                .map(ServicePackageItem::getMedicalService)
+                .filter(Objects::nonNull)
+                .map(MedicalService::getName)
+                .anyMatch(name -> safeLower(name).contains(normalizedKeyword));
+    }
+
+    private boolean matchesAdminPackageActive(ServicePackage servicePackage, Boolean active) {
+        if (active == null) {
+            return true;
+        }
+        return servicePackage != null && Objects.equals(Boolean.TRUE.equals(servicePackage.getIsActive()), active);
+    }
+
+    private boolean matchesAdminPackageConfigured(ServicePackage servicePackage, Boolean configured) {
+        if (configured == null) {
+            return true;
+        }
+        boolean hasItems = countPackageItems(servicePackage) > 0;
+        return configured.equals(hasItems);
+    }
+
     private String safeLower(String value) {
         return value == null ? "" : value.toLowerCase(Locale.ROOT);
+    }
+
+    private int countPackageItems(ServicePackage servicePackage) {
+        if (servicePackage == null || servicePackage.getItems() == null) {
+            return 0;
+        }
+        return (int) servicePackage.getItems().stream()
+                .filter(Objects::nonNull)
+                .count();
+    }
+
+    private String resolvePackageStatus(ServicePackage servicePackage) {
+        return Boolean.TRUE.equals(servicePackage == null ? null : servicePackage.getIsActive())
+                ? "ACTIVE"
+                : "INACTIVE";
+    }
+
+    private String resolvePackageStatusDisplay(ServicePackage servicePackage) {
+        return "ACTIVE".equals(resolvePackageStatus(servicePackage))
+                ? "Dang hoat dong"
+                : "Tam ngung";
+    }
+
+    private boolean hasPackageBookings(
+            ServicePackage servicePackage,
+            Map<Integer, PackageBookingStats> bookingStatsByPackageId
+    ) {
+        if (servicePackage == null || servicePackage.getId() == null || bookingStatsByPackageId == null) {
+            return false;
+        }
+        PackageBookingStats stats = bookingStatsByPackageId.get(servicePackage.getId());
+        return stats != null && stats.totalHistory() > 0;
     }
 
     private String normalizeBookingStatus(String value) {
@@ -485,5 +639,63 @@ public class ServicePackageService {
             return null;
         }
         return String.format("PKG%06d", bookingId);
+    }
+
+    private Map<Integer, PackageBookingStats> buildBookingStatsByPackageId(List<ServicePackageBooking> bookings) {
+        Map<Integer, MutablePackageBookingStats> mutableStats = new HashMap<>();
+        if (bookings == null || bookings.isEmpty()) {
+            return Map.of();
+        }
+
+        for (ServicePackageBooking booking : bookings) {
+            if (booking == null || booking.getServicePackage() == null || booking.getServicePackage().getId() == null) {
+                continue;
+            }
+            Integer packageId = booking.getServicePackage().getId();
+            MutablePackageBookingStats bucket = mutableStats.computeIfAbsent(packageId, key -> new MutablePackageBookingStats());
+            bucket.totalHistory++;
+
+            String normalizedStatus = normalizeBookingStatus(booking.getStatus());
+            String normalizedPaymentStatus = normalizePaymentStatus(booking.getPaymentStatus());
+            if (!"CANCELLED".equals(normalizedStatus)) {
+                bucket.totalBooked++;
+            }
+            if ("COMPLETED".equals(normalizedStatus)) {
+                bucket.totalCompleted++;
+            }
+            if ("PAID".equals(normalizedPaymentStatus)) {
+                bucket.totalPaid++;
+            }
+            if ("PENDING_PAYMENT".equals(normalizedStatus)) {
+                bucket.totalPending++;
+            }
+        }
+
+        Map<Integer, PackageBookingStats> finalizedStats = new HashMap<>();
+        for (Map.Entry<Integer, MutablePackageBookingStats> entry : mutableStats.entrySet()) {
+            MutablePackageBookingStats value = entry.getValue();
+            finalizedStats.put(entry.getKey(), new PackageBookingStats(
+                    value.totalHistory,
+                    value.totalBooked,
+                    value.totalCompleted,
+                    value.totalPaid,
+                    value.totalPending
+            ));
+        }
+        return finalizedStats;
+    }
+
+    private record PackageBookingStats(Long totalHistory, Long totalBooked, Long totalCompleted, Long totalPaid, Long totalPending) {
+        private static PackageBookingStats empty() {
+            return new PackageBookingStats(0L, 0L, 0L, 0L, 0L);
+        }
+    }
+
+    private static class MutablePackageBookingStats {
+        private long totalHistory = 0L;
+        private long totalBooked = 0L;
+        private long totalCompleted = 0L;
+        private long totalPaid = 0L;
+        private long totalPending = 0L;
     }
 }

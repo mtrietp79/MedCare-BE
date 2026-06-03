@@ -133,11 +133,12 @@ public class FinanceService {
             doctorName = invoice.getMedicalRecord().getDoctor().getFullName();
         }
         String invoiceCode = invoiceId == null ? null : "INV" + String.format("%06d", invoiceId);
+        double consultationFee = safeDouble(invoice.getConsultationFee());
         double medicineFee = safeDouble(invoice.getMedicineFee());
         double serviceFee = safeDouble(invoice.getServiceFee());
         double totalAmount = safeDouble(invoice.getTotalAmount());
-        if (totalAmount <= 0 && (medicineFee + serviceFee) > 0) {
-            totalAmount = medicineFee + serviceFee;
+        if (totalAmount <= 0 && (consultationFee + medicineFee + serviceFee) > 0) {
+            totalAmount = consultationFee + medicineFee + serviceFee;
         }
 
         return new InvoiceResponse(
@@ -243,7 +244,9 @@ public class FinanceService {
         String status = normalizeFilter(invoice.getStatus());
         double payableAmount = safeDouble(invoice.getTotalAmount());
         if (payableAmount <= 0) {
-            payableAmount = safeDouble(invoice.getMedicineFee()) + safeDouble(invoice.getServiceFee());
+            payableAmount = safeDouble(invoice.getConsultationFee())
+                    + safeDouble(invoice.getMedicineFee())
+                    + safeDouble(invoice.getServiceFee());
         }
         return (status == null || "unpaid".equals(status) || "pending".equals(status))
                 && payableAmount > 0;

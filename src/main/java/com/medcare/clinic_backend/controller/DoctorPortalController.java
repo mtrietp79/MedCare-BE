@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 
@@ -63,8 +64,20 @@ public class DoctorPortalController {
     }
 
     @GetMapping("/medicines")
-    public List<DoctorMedicineResponse> getMedicines(Authentication authentication) {
-        return doctorPortalService.getMedicinesForDoctor(getCurrentUsername(authentication));
+    public List<DoctorMedicineResponse> getMedicines(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer categoryId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String category,
+            Authentication authentication
+    ) {
+        return doctorPortalService.getMedicinesForDoctor(
+                getCurrentUsername(authentication),
+                keyword,
+                categoryId,
+                status,
+                category
+        );
     }
 
     @GetMapping("/medical-services")
@@ -165,10 +178,26 @@ public class DoctorPortalController {
         if (value == null || value.isBlank()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu tham so '" + fieldName + "'.");
         }
-        try {
-            return LocalDate.parse(value.trim());
-        } catch (DateTimeParseException ex) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ngay khong hop le. Dinh dang dung: yyyy-MM-dd.");
+
+        String normalized = value.trim();
+        List<DateTimeFormatter> acceptedFormats = List.of(
+                DateTimeFormatter.ISO_LOCAL_DATE,
+                DateTimeFormatter.ofPattern("d/M/yyyy"),
+                DateTimeFormatter.ofPattern("dd/MM/yyyy"),
+                DateTimeFormatter.ofPattern("yyyy-M-d")
+        );
+
+        for (DateTimeFormatter formatter : acceptedFormats) {
+            try {
+                return LocalDate.parse(normalized, formatter);
+            } catch (DateTimeParseException ignored) {
+                // try next format
+            }
         }
+
+        throw new BusinessException(
+                HttpStatus.BAD_REQUEST,
+                "Ngay khong hop le. Dinh dang ho tro: yyyy-MM-dd hoac d/M/yyyy."
+        );
     }
 }

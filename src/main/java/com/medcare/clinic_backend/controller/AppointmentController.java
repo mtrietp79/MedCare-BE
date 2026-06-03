@@ -1,5 +1,7 @@
 package com.medcare.clinic_backend.controller;
 
+import com.medcare.clinic_backend.config.VNPayConfig;
+import com.medcare.clinic_backend.dto.AppointmentBookingResponse;
 import com.medcare.clinic_backend.dto.BookingRulesDto;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.entity.Appointment;
@@ -9,6 +11,8 @@ import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.DoctorRepository;
 import com.medcare.clinic_backend.repository.PatientRepository;
 import com.medcare.clinic_backend.service.AppointmentService;
+import com.medcare.clinic_backend.service.PaymentService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -34,6 +38,9 @@ public class AppointmentController {
 
     @Autowired
     private DoctorRepository doctorRepository;
+
+    @Autowired
+    private PaymentService paymentService;
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR', 'ROLE_PATIENT')")
@@ -98,18 +105,33 @@ public class AppointmentController {
     @PostMapping
     @PreAuthorize("hasAuthority('ROLE_PATIENT')")
     public ResponseEntity<Appointment> create(@RequestBody Appointment appointment) {
-        if (appointment == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Du lieu lich hen khong hop le.");
-        }
-
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        Patient currentPatient = getCurrentPatientOrThrow(authentication);
-
-        appointment.setPatient(currentPatient);
-        appointment.setStatus("PENDING");
-
-        Appointment savedAppointment = appointmentService.createAppointment(appointment);
+        Appointment savedAppointment = prepareAndCreateAppointment(appointment, authentication);
         return ResponseEntity.ok(savedAppointment);
+    }
+
+    @PostMapping("/book")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public ResponseEntity<AppointmentBookingResponse> bookAndPay(
+            @RequestBody Appointment appointment,
+            Authentication authentication,
+            HttpServletRequest request
+    ) {
+        Appointment savedAppointment = prepareAndCreateAppointment(appointment, authentication);
+        paymentService.createPendingTransaction(savedAppointment.getId(), savedAppointment.getConsultationFee());
+        String paymentUrl = paymentService.createPaymentUrl(
+                savedAppointment.getId(),
+                VNPayConfig.getIpAddress(request),
+                authentication == null ? null : authentication.getName()
+        );
+
+        return ResponseEntity.ok(new AppointmentBookingResponse(
+                savedAppointment.getId(),
+                savedAppointment.getAppointmentCode(),
+                savedAppointment.getConsultationFee(),
+                paymentUrl,
+                "Tao lich hen thanh cong, vui long thanh toan VNPay."
+        ));
     }
 
     @PutMapping("/{id}")
@@ -175,6 +197,17 @@ public class AppointmentController {
                 && authentication.getAuthorities().stream().anyMatch(a -> authority.equals(a.getAuthority()));
     }
 
+    private Appointment prepareAndCreateAppointment(Appointment appointment, Authentication authentication) {
+        if (appointment == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Du lieu lich hen khong hop le.");
+        }
+
+        Patient currentPatient = getCurrentPatientOrThrow(authentication);
+        appointment.setPatient(currentPatient);
+        appointment.setStatus("PENDING_PAYMENT");
+        return appointmentService.createAppointment(appointment);
+    }
+
     private Patient getCurrentPatientOrThrow(Authentication authentication) {
         if (authentication == null || authentication.getName() == null) {
             throw new BusinessException(HttpStatus.UNAUTHORIZED, "Khong xac dinh duoc nguoi dung hien tai.");
@@ -234,7 +267,7 @@ public class AppointmentController {
                 || appointment.getMedicalService() != null
                 || appointment.getServicePackage() != null
                 || appointment.getAppointmentDate() != null
-                || appointment.getType() != null
+                || appointment.getAppointmentType() != null
                 || appointment.getSymptoms() != null
                 || appointment.getConsultationFee() != null
                 || appointment.getNotes() != null;

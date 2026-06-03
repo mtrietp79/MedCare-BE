@@ -53,11 +53,30 @@ public class WebsiteFeedbackController {
         return feedbackService.approveWebsiteFeedback(id);
     }
 
+    @RequestMapping(value = {
+            "/api/admin/website-feedbacks/{id}/unhide",
+            "/api/admin/website-feedbacks/{id}/show",
+            "/api/admin/website-feedbacks/{id}/publish"
+    }, method = {RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.POST})
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public MessageResponse unhideWebsiteFeedback(@PathVariable Integer id) {
+        return feedbackService.unhideWebsiteFeedback(id);
+    }
+
     @RequestMapping(value = "/api/admin/website-feedbacks/{id}/hide", method = {
             RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.POST
     })
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public MessageResponse hideWebsiteFeedback(@PathVariable Integer id) {
+        return feedbackService.hideWebsiteFeedback(id);
+    }
+
+    @RequestMapping(value = {
+            "/api/admin/website-feedbacks/{id}/archive",
+            "/api/admin/website-feedbacks/{id}/reject"
+    }, method = {RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.POST})
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    public MessageResponse hideWebsiteFeedbackCompat(@PathVariable Integer id) {
         return feedbackService.hideWebsiteFeedback(id);
     }
 
@@ -69,7 +88,8 @@ public class WebsiteFeedbackController {
 
     @RequestMapping(value = {
             "/api/admin/website-feedbacks/{id}/delete",
-            "/api/admin/website-feedbacks/{id}/remove"
+            "/api/admin/website-feedbacks/{id}/remove",
+            "/api/admin/website-feedbacks/{id}/destroy"
     }, method = {RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH})
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public MessageResponse deleteWebsiteFeedbackCompat(@PathVariable Integer id) {

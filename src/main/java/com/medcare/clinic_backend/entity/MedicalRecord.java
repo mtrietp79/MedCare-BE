@@ -1,8 +1,11 @@
 package com.medcare.clinic_backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
+
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @Entity
@@ -13,33 +16,44 @@ public class MedicalRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    // Cuốn sổ của ai? (Nhiều trang record thuộc về 1 bệnh nhân)
     @ManyToOne
     @JoinColumn(name = "patient_id", nullable = false)
     private Patient patient;
 
-    // Bác sĩ nào khám và ghi trang này?
     @ManyToOne
     @JoinColumn(name = "doctor_id", nullable = false)
     private Doctor doctor;
 
-    // Kết quả của cuộc hẹn nào? (1 cuộc hẹn sinh ra 1 trang record)
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "appointment_id", nullable = false, unique = true)
     private Appointment appointment;
 
+    @Column(name = "medical_record_code", length = 30, unique = true)
+    private String medicalRecordCode;
+
+    @Column(name = "created_at")
+    private LocalDateTime createdAt = LocalDateTime.now();
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "follow_up_appointment_id")
+    private Appointment followUpAppointment;
+
+    @Column(length = 50)
+    private String type = "Khám bệnh";
+
     @Column(name = "examination_date", nullable = false)
-    private LocalDate examinationDate; // Ngày khám (Ngày lật trang sổ)
+    private LocalDate examinationDate;
 
     @Column(nullable = false, columnDefinition = "TEXT")
-    private String diagnosis; // Chẩn đoán ngày hôm đó
+    private String diagnosis;
 
     @Column(columnDefinition = "TEXT")
-    private String treatmentPlan; // Hướng điều trị
+    private String treatmentPlan;
 
     @Column(columnDefinition = "TEXT")
-    private String prescription; // Kê đơn thuốc
+    private String prescription;
 
     @Column(columnDefinition = "TEXT")
-    private String doctorAdvice; // Lời khuyên
+    private String doctorAdvice;
 }

@@ -1,5 +1,7 @@
 package com.medcare.clinic_backend.controller;
 
+import com.medcare.clinic_backend.dto.medicalrecord.PatientMedicalRecordDetailResponse;
+import com.medcare.clinic_backend.dto.medicalrecord.PatientMedicalRecordListItemResponse;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.MedicalRecord;
 import com.medcare.clinic_backend.entity.Patient;
@@ -53,16 +55,26 @@ public class MedicalRecordController {
 
     @GetMapping("/my")
     @PreAuthorize("hasAuthority('ROLE_PATIENT')")
-    public List<MedicalRecord> getMyRecords(Authentication authentication) {
+    public List<PatientMedicalRecordListItemResponse> getMyRecords(Authentication authentication) {
         Patient patient = getCurrentPatientOrThrow(authentication);
-        return medicalRecordService.getHistoryByPatientId(patient.getId());
+        return medicalRecordService.getPatientRecordSummaries(patient.getId());
     }
 
     @GetMapping("/my/{id}")
     @PreAuthorize("hasAuthority('ROLE_PATIENT')")
-    public MedicalRecord getMyRecordById(@PathVariable Integer id, Authentication authentication) {
+    public PatientMedicalRecordDetailResponse getMyRecordById(@PathVariable Integer id, Authentication authentication) {
         Patient patient = getCurrentPatientOrThrow(authentication);
-        return medicalRecordService.getRecordByIdForPatient(id, patient.getId());
+        return medicalRecordService.getPatientRecordDetailById(id, patient.getId());
+    }
+
+    @GetMapping("/my/appointment/{appointmentId}")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public PatientMedicalRecordDetailResponse getMyRecordByAppointmentId(
+            @PathVariable Integer appointmentId,
+            Authentication authentication
+    ) {
+        Patient patient = getCurrentPatientOrThrow(authentication);
+        return medicalRecordService.getPatientRecordDetailByAppointmentId(appointmentId, patient.getId());
     }
 
     @GetMapping("/patient/{patientId}")

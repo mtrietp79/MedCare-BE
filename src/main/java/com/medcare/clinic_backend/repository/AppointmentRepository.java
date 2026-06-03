@@ -74,6 +74,10 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
 
     Optional<Appointment> findByIdAndDoctorId(Integer id, Integer doctorId);
 
+    List<Appointment> findByDoctorIdAndAppointmentDate(Integer doctorId, LocalDateTime appointmentDate);
+
+    boolean existsByParentAppointmentId(Integer parentAppointmentId);
+
     @Query("SELECT DISTINCT a.patient FROM Appointment a WHERE a.doctor.id = :doctorId ORDER BY a.patient.fullName ASC")
     List<Patient> findDistinctPatientsByDoctorId(@Param("doctorId") Integer doctorId);
 
@@ -82,7 +86,7 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
 
     @Query("SELECT COUNT(DISTINCT a.patient.id) FROM Appointment a " +
             "WHERE a.doctor.id = :doctorId " +
-            "AND LOWER(COALESCE(a.type, '')) LIKE CONCAT('%', LOWER(:typeKeyword), '%')")
+            "AND LOWER(COALESCE(a.appointmentType, '')) LIKE CONCAT('%', LOWER(:typeKeyword), '%')")
     long countDistinctPatientsByDoctorIdAndTypeKeyword(@Param("doctorId") Integer doctorId, @Param("typeKeyword") String typeKeyword);
 
     boolean existsByDoctorIdAndPatientId(Integer doctorId, Integer patientId);

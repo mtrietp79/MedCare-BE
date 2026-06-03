@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.config;
 
 import com.medcare.clinic_backend.security.JwtAuthenticationFilter;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -45,6 +46,18 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"message\":\"Chua dang nhap hoac token khong hop le.\"}");
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"message\":\"Ban khong co quyen truy cap tai nguyen nay.\"}");
+                        })
+                )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
@@ -63,6 +76,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/appointments/doctor/*/slots").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/appointments/medical-service/*/slots").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/doctors/*/photo").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/admin/dashboard/**", "/api/dashboard/**").permitAll()
                         .requestMatchers("/api/payment/vnpay-return").permitAll()
 
                         // Role-based protected APIs

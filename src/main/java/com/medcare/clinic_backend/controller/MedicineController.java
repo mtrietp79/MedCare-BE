@@ -1,10 +1,13 @@
 package com.medcare.clinic_backend.controller;
 
-import com.medcare.clinic_backend.entity.Medicine;
+import com.medcare.clinic_backend.dto.AdminMedicineSummaryResponse;
+import com.medcare.clinic_backend.dto.MedicineRequest;
+import com.medcare.clinic_backend.dto.MedicineResponse;
 import com.medcare.clinic_backend.service.MedicineService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
 
 @RestController
@@ -16,26 +19,43 @@ public class MedicineController {
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
-    public List<Medicine> getAll() {
-        return medicineService.getAllMedicines();
+    public List<MedicineResponse> getAll(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer categoryId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String category
+    ) {
+        return medicineService.getAllMedicineResponses(keyword, categoryId, status, category);
+    }
+
+    @GetMapping("/categories")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
+    public List<String> getCategories() {
+        return medicineService.getMedicineCategories();
+    }
+
+    @GetMapping("/summary")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
+    public AdminMedicineSummaryResponse getSummary() {
+        return medicineService.getAdminMedicineSummary();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ROLE_DOCTOR')")
-    public Medicine getById(@PathVariable Integer id) {
-        return medicineService.getMedicineById(id);
+    public MedicineResponse getById(@PathVariable Integer id) {
+        return medicineService.getMedicineResponseById(id);
     }
 
     @PostMapping
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public Medicine create(@RequestBody Medicine medicine) {
-        return medicineService.createMedicine(medicine);
+    public MedicineResponse create(@RequestBody MedicineRequest request) {
+        return medicineService.toMedicineResponse(medicineService.createMedicine(request));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
-    public Medicine update(@PathVariable Integer id, @RequestBody Medicine medicine) {
-        return medicineService.updateMedicine(id, medicine);
+    public MedicineResponse update(@PathVariable Integer id, @RequestBody MedicineRequest request) {
+        return medicineService.toMedicineResponse(medicineService.updateMedicine(id, request));
     }
 
     @DeleteMapping("/{id}")

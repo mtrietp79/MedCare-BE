@@ -1,10 +1,12 @@
 package com.medcare.clinic_backend.dto.doctor;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -34,6 +36,7 @@ public class DoctorPatientMedicalRecordsResponse {
     public static class RecordItem {
         private Integer recordId;
         private Integer appointmentId;
+        private LocalDateTime recordCreatedAt;
         private LocalDate examDate;
         private String type;
         private String symptoms;
@@ -41,6 +44,11 @@ public class DoctorPatientMedicalRecordsResponse {
         private String doctorAdvice;
         private List<MedicineItem> medicines;
         private List<ServiceItem> services;
+
+        @JsonProperty("createdAt")
+        public LocalDateTime getCreatedAt() {
+            return recordCreatedAt;
+        }
     }
 
     @Data

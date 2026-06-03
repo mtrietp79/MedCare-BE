@@ -20,6 +20,8 @@ public class DoctorAppointmentDetailResponse {
     private String appointmentTimeLabel;
     private String type;
     private String status;
+    private String paymentStatus;
+    private Double consultationFee;
     private String note;
     private String symptoms;
 

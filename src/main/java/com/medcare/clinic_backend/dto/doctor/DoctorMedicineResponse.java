@@ -10,6 +10,9 @@ import lombok.NoArgsConstructor;
 public class DoctorMedicineResponse {
     private Integer id;
     private String name;
+    private Integer medicineCategoryId;
+    private String medicineCategoryName;
+    private String medicineCategory;
     private String unit;
     private Integer quantity;
     private String dosage;

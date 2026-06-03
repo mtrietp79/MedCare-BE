@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/admin/service-package-bookings")
+@RequestMapping({"/api/admin/service-package-bookings", "/api/admin/service-packages/bookings"})
 @PreAuthorize("hasAuthority('ROLE_ADMIN')")
 public class AdminServicePackageBookingController {
 

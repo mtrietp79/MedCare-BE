@@ -18,5 +18,8 @@ public class CreateFollowUpResponse {
     private LocalTime appointmentTime;
     private String type;
     private String status;
+    private Double consultationFee;
+    private String paymentStatus;
     private String note;
+    private Integer parentAppointmentId;
 }

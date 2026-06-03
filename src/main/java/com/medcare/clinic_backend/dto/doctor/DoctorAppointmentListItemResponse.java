@@ -21,5 +21,9 @@ public class DoctorAppointmentListItemResponse {
     private String appointmentTimeLabel;
     private String type;
     private String status;
+    private Double consultationFee;
+    private String paymentStatus;
+    private String followUpNote;
+    private Integer parentAppointmentId;
     private boolean canExamine;
 }

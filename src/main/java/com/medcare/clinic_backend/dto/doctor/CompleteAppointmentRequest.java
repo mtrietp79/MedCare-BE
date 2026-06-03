@@ -2,8 +2,6 @@ package com.medcare.clinic_backend.dto.doctor;
 
 import lombok.Data;
 
-import java.time.LocalDate;
-import java.time.LocalTime;
 import java.util.List;
 
 @Data
@@ -32,8 +30,8 @@ public class CompleteAppointmentRequest {
     @Data
     public static class FollowUp {
         private Boolean needFollowUp;
-        private LocalDate followUpDate;
-        private LocalTime followUpTime;
+        private String followUpDate;
+        private String followUpTime;
         private String note;
     }
 }

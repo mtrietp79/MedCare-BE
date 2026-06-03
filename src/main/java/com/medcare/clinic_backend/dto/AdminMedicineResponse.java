@@ -12,6 +12,7 @@ import java.time.LocalDate;
 public class AdminMedicineResponse {
     private Integer id;
     private String name;
+    private String medicineCategory;
     private String category;
     private String manufacturer;
     private Integer quantity;

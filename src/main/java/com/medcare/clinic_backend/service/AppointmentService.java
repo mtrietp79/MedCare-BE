@@ -16,8 +16,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.text.Normalizer;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,8 +29,10 @@ import java.util.stream.Collectors;
 @Service
 public class AppointmentService {
 
-    private static final Set<String> ALLOWED_STATUSES = Set.of("PENDING", "CONFIRMED", "COMPLETED", "CANCELLED");
+    private static final Set<String> ALLOWED_STATUSES = Set.of("PENDING_PAYMENT", "PENDING", "CONFIRMED", "COMPLETED", "CANCELLED");
     private static final int MIN_BOOKING_LEAD_HOURS = 2;
+    private static final int MAX_BOOKING_AHEAD_DAYS = 14;
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     @Autowired
     private AppointmentRepository appointmentRepository;
@@ -38,9 +42,6 @@ public class AppointmentService {
 
     @Autowired
     private PatientService patientService;
-
-    @Autowired
-    private AppointmentNotificationService appointmentNotificationService;
 
     @Autowired
     private MedicalServiceService medicalServiceService;
@@ -60,7 +61,8 @@ public class AppointmentService {
     public BookingRulesDto getBookingRules() {
         LocalDateTime serverNow = LocalDateTime.now().withSecond(0).withNano(0);
         LocalDateTime minBookableAt = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
-        return new BookingRulesDto(serverNow, minBookableAt);
+        LocalDate maxBookableDate = serverNow.toLocalDate().plusDays(MAX_BOOKING_AHEAD_DAYS);
+        return new BookingRulesDto(serverNow, minBookableAt, maxBookableDate, MAX_BOOKING_AHEAD_DAYS);
     }
 
     public Appointment getAppointmentById(Integer id) {
@@ -90,9 +92,15 @@ public class AppointmentService {
 
         SlotRule slotRule = resolveSlotRule(app.getAppointmentDate());
         app.setAppointmentDate(slotRule.start());
-        app.setStatus("PENDING");
-        if (app.getType() == null || app.getType().isBlank()) {
-            app.setType("Khám bệnh");
+        app.setStatus("PENDING_PAYMENT");
+        if (isFollowUpType(app.getAppointmentType())) {
+            throw new BusinessException(
+                    HttpStatus.BAD_REQUEST,
+                    "Lich tai kham chi duoc tao boi bac si sau khi hoan tat buoi kham truoc."
+            );
+        }
+        if (app.getAppointmentType() == null || app.getAppointmentType().isBlank()) {
+            app.setAppointmentType("Khám bệnh");
         }
         app.setPaymentStatus("UNPAID");
         app.setAppointmentCode(generateAppointmentCode());
@@ -106,9 +114,7 @@ public class AppointmentService {
             ensureSpecialtyForDoctor(app, doctor);
             validateDoctorAvailability(doctor, slotRule, null);
             applyDoctorPricing(app, doctor);
-            Appointment savedAppointment = appointmentRepository.save(app);
-            appointmentNotificationService.sendAppointmentTicket(savedAppointment);
-            return savedAppointment;
+            return appointmentRepository.save(app);
         }
 
         if (app.getSpecialty() == null || app.getSpecialty().getId() == null) {
@@ -122,9 +128,7 @@ public class AppointmentService {
 
         app.setSpecialty(selectedDoctor.getSpecialty());
         applyDoctorPricing(app, selectedDoctor);
-        Appointment savedAppointment = appointmentRepository.save(app);
-        appointmentNotificationService.sendAppointmentTicket(savedAppointment);
-        return savedAppointment;
+        return appointmentRepository.save(app);
     }
 
     public List<SlotAvailabilityDto> getDoctorSlotStatus(Integer doctorId, LocalDate date) {
@@ -137,11 +141,12 @@ public class AppointmentService {
         List<SlotAvailabilityDto> result = new ArrayList<>();
         LocalDateTime serverNow = LocalDateTime.now();
         LocalDateTime minAllowedStart = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
+        LocalDate maxBookableDate = serverNow.toLocalDate().plusDays(MAX_BOOKING_AHEAD_DAYS);
 
         for (SlotRule slotRule : buildDailySlotRules(date)) {
             long bookedPatients = appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end());
             boolean full = bookedPatients >= slotRule.maxPatients();
-            String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart);
+            String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart, maxBookableDate);
             boolean disabled = disabledReason != null;
 
             result.add(new SlotAvailabilityDto(
@@ -180,6 +185,7 @@ public class AppointmentService {
         List<SlotAvailabilityDto> result = new ArrayList<>();
         LocalDateTime serverNow = LocalDateTime.now();
         LocalDateTime minAllowedStart = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
+        LocalDate maxBookableDate = serverNow.toLocalDate().plusDays(MAX_BOOKING_AHEAD_DAYS);
 
         for (SlotRule slotRule : buildDailySlotRules(date)) {
             long totalBookedPatients = candidateDoctorIds.stream()
@@ -189,7 +195,7 @@ public class AppointmentService {
             boolean hasAvailableDoctor = candidateDoctorIds.stream()
                     .anyMatch(doctorId -> appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end()) < slotRule.maxPatients());
             boolean full = candidateDoctorIds.isEmpty() || !hasAvailableDoctor;
-            String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart);
+            String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart, maxBookableDate);
             boolean disabled = disabledReason != null;
 
             result.add(new SlotAvailabilityDto(
@@ -245,7 +251,6 @@ public class AppointmentService {
 
         appointment.setDoctor(targetDoctor);
         applyUpdatedMedicalService(appointment, appointmentDetails);
-        applyAppointmentPricing(appointment, targetDoctor);
 
         if (appointmentDetails.getStatus() != null && !appointmentDetails.getStatus().isBlank()) {
             validateStatus(appointmentDetails.getStatus());
@@ -256,9 +261,11 @@ public class AppointmentService {
             appointment.setSymptoms(appointmentDetails.getSymptoms());
         }
 
-        if (appointmentDetails.getType() != null && !appointmentDetails.getType().isBlank()) {
-            appointment.setType(appointmentDetails.getType().trim());
+        if (appointmentDetails.getAppointmentType() != null && !appointmentDetails.getAppointmentType().isBlank()) {
+            appointment.setAppointmentType(appointmentDetails.getAppointmentType().trim());
         }
+
+        applyAppointmentPricing(appointment, targetDoctor);
 
         if (appointmentDetails.getNotes() != null) {
             appointment.setNotes(appointmentDetails.getNotes());
@@ -420,6 +427,14 @@ public class AppointmentService {
         if (slotStart.isBefore(now)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the dat lich o thoi diem da qua.");
         }
+        LocalDate maxBookableDate = now.toLocalDate().plusDays(MAX_BOOKING_AHEAD_DAYS);
+        if (slotStart.toLocalDate().isAfter(maxBookableDate)) {
+            throw new BusinessException(
+                    HttpStatus.BAD_REQUEST,
+                    "Chi duoc dat lich toi da " + MAX_BOOKING_AHEAD_DAYS
+                            + " ngay ke tu hien tai (den ngay " + maxBookableDate.format(DATE_FORMATTER) + ")."
+            );
+        }
 
         LocalDateTime minAllowedStart = now.plusHours(MIN_BOOKING_LEAD_HOURS);
         if (slotStart.isBefore(minAllowedStart)) {
@@ -434,10 +449,14 @@ public class AppointmentService {
             LocalDateTime slotStart,
             boolean full,
             LocalDateTime serverNow,
-            LocalDateTime minAllowedStart
+            LocalDateTime minAllowedStart,
+            LocalDate maxBookableDate
     ) {
         if (slotStart.isBefore(serverNow)) {
             return "PAST";
+        }
+        if (slotStart.toLocalDate().isAfter(maxBookableDate)) {
+            return "TOO_FAR";
         }
         if (slotStart.isBefore(minAllowedStart)) {
             return "LESS_THAN_2H";
@@ -580,6 +599,11 @@ public class AppointmentService {
     }
 
     private void applyAppointmentPricing(Appointment appointment, Doctor doctor) {
+        if (isFollowUpType(appointment.getAppointmentType())) {
+            appointment.setConsultationFee(resolveConsultationFee(doctor) * 0.5);
+            return;
+        }
+
         ServicePackage servicePackage = appointment.getServicePackage();
         if (servicePackage != null && servicePackage.getId() != null) {
             if (servicePackage.getPrice() == null) {
@@ -615,6 +639,19 @@ public class AppointmentService {
         }
 
         return price.doubleValue();
+    }
+
+    private boolean isFollowUpType(String type) {
+        if (type == null || type.isBlank()) {
+            return false;
+        }
+        String folded = Normalizer.normalize(type, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('\u0111', 'd')
+                .replace('\u0110', 'D')
+                .toLowerCase(java.util.Locale.ROOT)
+                .replace(" ", "");
+        return folded.contains("taikham");
     }
 
     private void validateStatus(String status) {

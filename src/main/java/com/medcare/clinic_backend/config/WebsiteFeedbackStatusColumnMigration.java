@@ -18,9 +18,46 @@ public class WebsiteFeedbackStatusColumnMigration implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        jdbcTemplate.execute("alter table website_feedbacks add column if not exists status varchar(20)");
-        jdbcTemplate.execute("update website_feedbacks set status = 'APPROVED' where is_approved = true and (status is null or trim(status) = '')");
-        jdbcTemplate.execute("update website_feedbacks set status = 'PENDING' where status is null or trim(status) = ''");
-        jdbcTemplate.execute("alter table website_feedbacks alter column status set default 'PENDING'");
+        jdbcTemplate.execute("""
+                do $$
+                begin
+                    if exists (
+                        select 1
+                        from information_schema.tables
+                        where table_schema = 'public'
+                          and table_name = 'website_feedbacks'
+                    ) then
+                        alter table public.website_feedbacks add column if not exists full_name varchar(100);
+                        alter table public.website_feedbacks add column if not exists email varchar(100);
+                        alter table public.website_feedbacks add column if not exists is_approved boolean default false;
+                        alter table public.website_feedbacks add column if not exists created_at timestamp without time zone;
+                        alter table public.website_feedbacks add column if not exists status varchar(20);
+                    end if;
+                end $$;
+                """);
+
+        jdbcTemplate.execute("""
+                update public.website_feedbacks
+                set created_at = coalesce(created_at, now())
+                where created_at is null
+                """);
+
+        jdbcTemplate.execute("""
+                update public.website_feedbacks
+                set status = 'APPROVED'
+                where coalesce(is_approved, false) = true
+                  and (status is null or trim(status) = '')
+                """);
+
+        jdbcTemplate.execute("""
+                update public.website_feedbacks
+                set status = 'PENDING'
+                where status is null or trim(status) = ''
+                """);
+
+        jdbcTemplate.execute("""
+                alter table public.website_feedbacks
+                alter column status set default 'PENDING'
+                """);
     }
 }

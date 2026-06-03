@@ -17,5 +17,11 @@ public class WebsiteFeedbackAdminResponse {
     private Integer rating;
     private String comment;
     private String status;
+    private String statusDisplay;
+    private Boolean canApprove;
+    private Boolean canHide;
+    private Boolean canUnhide;
+    private Boolean canDelete;
+    private Boolean visibleOnHomepage;
     private LocalDateTime createdAt;
 }

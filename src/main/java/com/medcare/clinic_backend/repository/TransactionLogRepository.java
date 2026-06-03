@@ -14,6 +14,11 @@ public interface TransactionLogRepository extends JpaRepository<TransactionLog, 
             String responseCode
     );
 
+    TransactionLog findTopByAppointmentIdAndResponseCodeOrderByCreatedAtDesc(
+            Integer appointmentId,
+            String responseCode
+    );
+
     TransactionLog findTopByInvoiceIdAndResponseCodeOrderByCreatedAtDesc(
             Integer invoiceId,
             String responseCode

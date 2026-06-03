@@ -13,4 +13,6 @@ public interface ServicePackageBookingRepository extends JpaRepository<ServicePa
     Optional<ServicePackageBooking> findByIdAndPatientId(Integer id, Integer patientId);
 
     List<ServicePackageBooking> findAllByOrderByCreatedAtDesc();
+
+    boolean existsByServicePackage_Id(Integer servicePackageId);
 }

@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/patient/service-package-bookings")
+@RequestMapping({"/api/patient/service-package-bookings", "/api/patient/service-packages/bookings"})
 @PreAuthorize("hasAuthority('ROLE_PATIENT')")
 public class PatientServicePackageBookingController {
 

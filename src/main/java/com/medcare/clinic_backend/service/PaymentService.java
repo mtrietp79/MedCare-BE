@@ -1,6 +1,8 @@
 package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.config.VNPayConfig;
+import com.medcare.clinic_backend.dto.payment.AppointmentPaymentReceiptResponse;
+import com.medcare.clinic_backend.dto.payment.PaymentReturnResult;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Invoice;
 import com.medcare.clinic_backend.entity.Patient;
@@ -20,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.text.Normalizer;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
@@ -28,6 +31,8 @@ public class PaymentService {
 
     private static final String SERVICE_PACKAGE_TXN_PREFIX = "SPB-";
     private static final String INVOICE_TXN_PREFIX = "INV-";
+    private static final String SUCCESS_CODE = "00";
+    private static final String APPOINTMENT_PAYMENT_METHOD = "VNPAY";
 
     @Autowired
     private TransactionLogRepository transactionLogRepository;
@@ -44,6 +49,9 @@ public class PaymentService {
     @Autowired
     private InvoiceRepository invoiceRepository;
 
+    @Autowired
+    private AppointmentNotificationService appointmentNotificationService;
+
     @Value("${vnpay.hashSecret}")
     private String secretKey;
 
@@ -55,6 +63,9 @@ public class PaymentService {
 
     @Value("${vnpay.returnUrl}")
     private String vnpReturnUrl;
+
+    @Value("${vnpay.appointmentFrontendReturnUrl:}")
+    private String appointmentFrontendReturnUrl;
 
     public long resolvePaymentAmount(Integer appointmentId) {
         Appointment appointment = appointmentRepository.findById(appointmentId)
@@ -74,11 +85,11 @@ public class PaymentService {
         ServicePackageBooking booking = servicePackageBookingRepository.findById(bookingId)
                 .orElseThrow(() -> new BusinessException(
                         HttpStatus.NOT_FOUND,
-                        "Khong tim thay phieu dich vu ID: " + bookingId
+                        "Khong tim thay dat goi dich vu ID: " + bookingId
                 ));
 
         if (booking.getTotalAmount() == null || booking.getTotalAmount() <= 0) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Phieu dich vu chua co tong tien hop le de thanh toan.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Dat goi dich vu chua co tong tien hop le de thanh toan.");
         }
 
         return Math.round(booking.getTotalAmount());
@@ -146,6 +157,18 @@ public class PaymentService {
         if ("CANCELLED".equals(status)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the thanh toan lich hen da huy.");
         }
+        if ("COMPLETED".equals(status)) {
+            throw new BusinessException(
+                    HttpStatus.BAD_REQUEST,
+                    "Lich hen da kham xong. Vui long thanh toan hoa don sau kham neu con phat sinh."
+            );
+        }
+        if (isFollowUpType(appointment.getAppointmentType())) {
+            throw new BusinessException(
+                    HttpStatus.BAD_REQUEST,
+                    "Lich tai kham khong thanh toan truoc. Vui long thanh toan hoa don sau khi bac si hoan tat kham."
+            );
+        }
         if ("PAID".equalsIgnoreCase(appointment.getPaymentStatus())
                 || "PAID_ONLINE".equalsIgnoreCase(appointment.getPaymentStatus())) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich hen nay da duoc thanh toan.");
@@ -190,13 +213,13 @@ public class PaymentService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu bookingId.");
         }
         ServicePackageBooking booking = servicePackageBookingRepository.findById(bookingId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay phieu dich vu ID: " + bookingId));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay dat goi dich vu ID: " + bookingId));
 
         long amount = resolveServicePackageBookingAmount(bookingId);
         String displayCode = booking.getBookingCode() == null ? String.valueOf(bookingId) : booking.getBookingCode();
         return buildPaymentUrl(
                 servicePackageTxnRef(bookingId),
-                "Thanh toan phieu dich vu: " + displayCode,
+                "Thanh toan dat goi dich vu: " + displayCode,
                 amount,
                 withReturnParam("bookingId", bookingId),
                 ipAddress
@@ -208,8 +231,79 @@ public class PaymentService {
         throw new BusinessException(HttpStatus.GONE, "He thong da ngung ho tro thanh toan tai phong kham. Vui long thanh toan qua VNPay.");
     }
 
+    @Transactional(readOnly = true)
+    public AppointmentPaymentReceiptResponse getAppointmentPaymentReceipt(Integer appointmentId, String username) {
+        if (appointmentId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu appointmentId.");
+        }
+
+        Patient patient = getCurrentPatientOrThrow(username);
+        Appointment appointment = appointmentRepository.findByIdAndPatientId(appointmentId, patient.getId())
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen ID: " + appointmentId));
+
+        if (!isAppointmentPaidOnline(appointment.getPaymentStatus())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich hen chua thanh toan thanh cong.");
+        }
+
+        TransactionLog paidLog = transactionLogRepository
+                .findTopByAppointmentIdAndResponseCodeOrderByCreatedAtDesc(appointmentId, SUCCESS_CODE);
+
+        AppointmentPaymentReceiptResponse.PatientInfo patientInfo = new AppointmentPaymentReceiptResponse.PatientInfo(
+                patient.getFullName(),
+                patient.getPhone(),
+                patient.getEmail()
+        );
+
+        AppointmentPaymentReceiptResponse.BookingInfo bookingInfo = new AppointmentPaymentReceiptResponse.BookingInfo(
+                appointment.getDoctorName(),
+                appointment.getSpecialtyName(),
+                appointment.getServiceName(),
+                appointment.getAppointmentDate(),
+                appointment.getStatusDisplay(),
+                appointment.getPaymentStatusDisplay(),
+                appointment.getConsultationFee()
+        );
+
+        AppointmentPaymentReceiptResponse.PaymentInfo paymentInfo = new AppointmentPaymentReceiptResponse.PaymentInfo(
+                APPOINTMENT_PAYMENT_METHOD,
+                paidLog == null ? null : paidLog.getVnpTransactionNo(),
+                paidLog == null ? null : paidLog.getBankCode(),
+                paidLog == null ? appointment.getConsultationFee() : paidLog.getAmount(),
+                paidLog == null ? null : paidLog.getCreatedAt(),
+                paidLog == null ? SUCCESS_CODE : paidLog.getResponseCode()
+        );
+
+        return new AppointmentPaymentReceiptResponse(
+                appointment.getId(),
+                appointment.getAppointmentCode(),
+                patientInfo,
+                bookingInfo,
+                paymentInfo
+        );
+    }
+
+    public String buildAppointmentFrontendReturnUrl(Integer appointmentId, PaymentReturnResult result) {
+        if (appointmentFrontendReturnUrl == null || appointmentFrontendReturnUrl.isBlank()) {
+            return null;
+        }
+        if (appointmentId == null || result == null) {
+            return appointmentFrontendReturnUrl;
+        }
+
+        String separator = appointmentFrontendReturnUrl.contains("?") ? "&" : "?";
+        String status = result.success() ? "SUCCESS" : "FAILED";
+        String encodedMessage = encodeQueryValue(result.message());
+        String encodedResponseCode = encodeQueryValue(result.responseCode());
+
+        return appointmentFrontendReturnUrl
+                + separator + "appointmentId=" + appointmentId
+                + "&status=" + status
+                + "&responseCode=" + encodedResponseCode
+                + "&message=" + encodedMessage;
+    }
+
     @Transactional
-    public String processVnpayReturn(Map<String, String> vnpParams, Integer appointmentId) {
+    public PaymentReturnResult processVnpayReturn(Map<String, String> vnpParams, Integer appointmentId) {
         if (secretKey == null || secretKey.isBlank()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "VNPay hash secret chua duoc cau hinh.");
         }
@@ -257,19 +351,28 @@ public class PaymentService {
 
         saveTransactionLogForAppointment(vnpParams, appointmentId, responseCode, parseAmount(vnpAmountRaw));
 
-        if ("00".equals(responseCode)) {
-            if (!"PAID_ONLINE".equalsIgnoreCase(appointment.getPaymentStatus())) {
+        if (SUCCESS_CODE.equals(responseCode)) {
+            boolean shouldSendMail = !isAppointmentPaidOnline(appointment.getPaymentStatus());
+            if (shouldSendMail) {
                 appointment.setPaymentStatus("PAID_ONLINE");
             }
-            if ("PENDING_PAYMENT".equalsIgnoreCase(appointment.getStatus())) {
-                appointment.setStatus("PENDING");
+            if (shouldPromoteAppointmentStatusAfterPayment(appointment.getStatus())) {
+                appointment.setStatus("CONFIRMED");
             }
-            appointmentRepository.save(appointment);
-            return "THANH TOAN THANH CONG! Trang thai lich hen da duoc cap nhat.";
+            Appointment savedAppointment = appointmentRepository.save(appointment);
+            if (shouldSendMail) {
+                appointmentNotificationService.sendAppointmentTicket(savedAppointment);
+            }
+            return new PaymentReturnResult(
+                    true,
+                    "THANH TOAN THANH CONG! Trang thai lich hen da duoc cap nhat.",
+                    responseCode
+            );
         }
 
         if ("24".equals(responseCode)) {
             appointment.setPaymentStatus("CANCELLED");
+            appointment.setStatus("CANCELLED");
         } else {
             appointment.setPaymentStatus("FAILED");
             if ("PENDING_PAYMENT".equalsIgnoreCase(appointment.getStatus())) {
@@ -278,11 +381,15 @@ public class PaymentService {
         }
         appointmentRepository.save(appointment);
 
-        return "THANH TOAN THAT BAI HOAC BI HUY BO. Ma loi VNPay: " + responseCode;
+        return new PaymentReturnResult(
+                false,
+                "THANH TOAN THAT BAI HOAC BI HUY BO. Ma loi VNPay: " + responseCode,
+                responseCode
+        );
     }
 
     @Transactional
-    public String processServicePackageBookingVnpayReturn(Map<String, String> vnpParams, Integer bookingId) {
+    public PaymentReturnResult processServicePackageBookingVnpayReturn(Map<String, String> vnpParams, Integer bookingId) {
         if (secretKey == null || secretKey.isBlank()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "VNPay hash secret chua duoc cau hinh.");
         }
@@ -303,7 +410,7 @@ public class PaymentService {
         String expectedTxnRef = servicePackageTxnRef(bookingId);
         if (vnpTxnRef == null || !expectedTxnRef.equals(vnpTxnRef)) {
             saveTransactionLogForServicePackage(vnpParams, bookingId, "INVALID_TXN_REF", parseAmount(vnpAmountRaw));
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thong tin giao dich khong khop voi phieu dich vu.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thong tin giao dich khong khop voi dat goi dich vu.");
         }
 
         if (!isValidVnpaySignature(vnpParams, receivedSecureHash)) {
@@ -314,28 +421,32 @@ public class PaymentService {
         ServicePackageBooking booking = servicePackageBookingRepository.findById(bookingId)
                 .orElseThrow(() -> new BusinessException(
                         HttpStatus.NOT_FOUND,
-                        "Khong tim thay phieu dich vu ID: " + bookingId
+                        "Khong tim thay dat goi dich vu ID: " + bookingId
                 ));
 
         if (booking.getTotalAmount() == null || booking.getTotalAmount() <= 0) {
             saveTransactionLogForServicePackage(vnpParams, bookingId, "INVALID_BOOKING_AMOUNT", parseAmount(vnpAmountRaw));
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Phieu dich vu chua co tong tien hop le.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Dat goi dich vu chua co tong tien hop le.");
         }
 
         long expectedAmount = Math.round(booking.getTotalAmount() * 100);
         long paidAmount = parseVnpAmount(vnpAmountRaw);
         if (expectedAmount != paidAmount) {
             saveTransactionLogForServicePackage(vnpParams, bookingId, "AMOUNT_MISMATCH", parseAmount(vnpAmountRaw));
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "So tien thanh toan khong khop voi phieu dich vu.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "So tien thanh toan khong khop voi dat goi dich vu.");
         }
 
         saveTransactionLogForServicePackage(vnpParams, bookingId, responseCode, parseAmount(vnpAmountRaw));
 
-        if ("00".equals(responseCode)) {
+        if (SUCCESS_CODE.equals(responseCode)) {
             booking.setPaymentStatus("PAID");
             booking.setStatus("PAID");
             servicePackageBookingRepository.save(booking);
-            return "THANH TOAN THANH CONG! Phieu dich vu da duoc cap nhat.";
+            return new PaymentReturnResult(
+                    true,
+                    "THANH TOAN THANH CONG! Dat goi dich vu da duoc cap nhat.",
+                    responseCode
+            );
         }
 
         if ("24".equals(responseCode)) {
@@ -346,11 +457,15 @@ public class PaymentService {
             booking.setStatus("PENDING_PAYMENT");
         }
         servicePackageBookingRepository.save(booking);
-        return "THANH TOAN THAT BAI HOAC BI HUY BO. Ma loi VNPay: " + responseCode;
+        return new PaymentReturnResult(
+                false,
+                "THANH TOAN THAT BAI HOAC BI HUY BO. Ma loi VNPay: " + responseCode,
+                responseCode
+        );
     }
 
     @Transactional
-    public String processInvoiceVnpayReturn(Map<String, String> vnpParams, Integer invoiceId) {
+    public PaymentReturnResult processInvoiceVnpayReturn(Map<String, String> vnpParams, Integer invoiceId) {
         if (secretKey == null || secretKey.isBlank()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "VNPay hash secret chua duoc cau hinh.");
         }
@@ -396,17 +511,25 @@ public class PaymentService {
 
         saveTransactionLogForInvoice(vnpParams, invoiceId, responseCode, parseAmount(vnpAmountRaw));
 
-        if ("00".equals(responseCode)) {
+        if (SUCCESS_CODE.equals(responseCode)) {
             invoice.setStatus("PAID");
             invoiceRepository.save(invoice);
-            return "THANH TOAN THANH CONG! Hoa don da duoc cap nhat.";
+            return new PaymentReturnResult(
+                    true,
+                    "THANH TOAN THANH CONG! Hoa don da duoc cap nhat.",
+                    responseCode
+            );
         }
 
         if (!"PAID".equalsIgnoreCase(invoice.getStatus())) {
             invoice.setStatus("UNPAID");
             invoiceRepository.save(invoice);
         }
-        return "THANH TOAN THAT BAI HOAC BI HUY BO. Ma loi VNPay: " + responseCode;
+        return new PaymentReturnResult(
+                false,
+                "THANH TOAN THAT BAI HOAC BI HUY BO. Ma loi VNPay: " + responseCode,
+                responseCode
+        );
     }
 
     private String buildPaymentUrl(
@@ -623,5 +746,38 @@ public class PaymentService {
         } catch (NumberFormatException ex) {
             return 0.0;
         }
+    }
+
+    private boolean isAppointmentPaidOnline(String paymentStatus) {
+        if (paymentStatus == null || paymentStatus.isBlank()) {
+            return false;
+        }
+        String normalized = paymentStatus.trim().toUpperCase(Locale.ROOT);
+        return "PAID_ONLINE".equals(normalized) || "PAID".equals(normalized);
+    }
+
+    private boolean shouldPromoteAppointmentStatusAfterPayment(String status) {
+        if (status == null || status.isBlank()) {
+            return true;
+        }
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        return "PENDING".equals(normalized) || "PENDING_PAYMENT".equals(normalized);
+    }
+
+    private boolean isFollowUpType(String type) {
+        if (type == null || type.isBlank()) {
+            return false;
+        }
+        String folded = Normalizer.normalize(type, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replace('đ', 'd')
+                .replace(" ", "");
+        return folded.contains("taikham");
+    }
+
+    private String encodeQueryValue(String value) {
+        String resolved = value == null ? "" : value;
+        return URLEncoder.encode(resolved, StandardCharsets.UTF_8);
     }
 }

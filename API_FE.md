@@ -1,5 +1,8 @@
 # Clinic Backend API for Frontend
 
+> Status/payment mini contract for FE:
+> `API_FE_STATUS_CONTRACT.md`
+
 ## 1) Base setup
 
 - Base URL: `http://localhost:8080`
@@ -15,6 +18,71 @@
   - `/swagger-ui/**`
   - `/v3/api-docs/**`
 - All remaining APIs require JWT.
+
+## 2.1) Admin Hotfix 2026-06-01
+
+- `GET /api/admin/dashboard/**` and `GET /api/dashboard/**`:
+  - now requires `ROLE_ADMIN` (no longer returns fake zero data for non-admin).
+
+- Service package management (`/api/admin/service-packages`):
+  - response now includes package booking counters:
+    - `totalBooked`
+    - `totalCompleted`
+    - `totalPaid`
+    - `totalPending`
+  - response also includes:
+    - `itemCount`
+    - `status` = `ACTIVE | INACTIVE`
+    - `statusDisplay`
+    - `hasBookings`
+    - `canDelete`
+  - admin list query params:
+    - `keyword` or `q` or `search`
+    - `active=true|false`
+    - `status=ACTIVE|INACTIVE`
+    - `configured=true|false`
+  - new endpoints:
+    - `GET /api/admin/service-packages/summary`
+    - `GET /api/admin/service-packages/{id}`
+    - `PATCH /api/admin/service-packages/{id}/active?active=true|false`
+  - `DELETE /api/admin/service-packages/{id}`:
+    - now returns `{ "message": "Da xoa goi dich vu." }`
+    - backend rejects delete if package already has bookings
+
+- Service package booking admin path aliases:
+  - old: `/api/admin/service-package-bookings`
+  - new alias: `/api/admin/service-packages/bookings`
+
+- Patient service package booking path aliases:
+  - old: `/api/patient/service-package-bookings`
+  - new alias: `/api/patient/service-packages/bookings`
+
+- Admin medicine create/update/quantity now return `AdminMedicineResponse` shape (same as medicine list page), not raw `Medicine` entity.
+
+- Website feedback admin response now includes:
+  - `statusDisplay`
+  - `canApprove`
+  - `canHide`
+  - `canUnhide`
+  - `canDelete`
+  - `visibleOnHomepage`
+
+- Website feedback action aliases added:
+  - unhide/show/publish:
+    - `PUT|PATCH|POST /api/admin/website-feedbacks/{id}/unhide`
+    - `PUT|PATCH|POST /api/admin/website-feedbacks/{id}/show`
+    - `PUT|PATCH|POST /api/admin/website-feedbacks/{id}/publish`
+  - hide aliases:
+    - `PUT|PATCH|POST /api/admin/website-feedbacks/{id}/archive`
+    - `PUT|PATCH|POST /api/admin/website-feedbacks/{id}/reject`
+  - delete alias:
+    - `PUT|PATCH|POST /api/admin/website-feedbacks/{id}/destroy`
+
+- Website feedback admin action messages:
+  - approve -> `Da duyet feedback.`
+  - hide -> `Da an feedback.`
+  - unhide -> `Da bo an feedback.`
+  - delete -> `Da xoa feedback.`
 
 ---
 
@@ -600,6 +668,14 @@ FE rule:
 ### `GET /api/medicines`
 
 - Role: `ROLE_ADMIN` or `ROLE_DOCTOR`
+- Query optional:
+  - `keyword`: search theo `name` hoặc `medicineCategory`
+  - `category`: lọc theo `medicineCategory` (exact match, không phân biệt hoa thường)
+- Response item cần dùng:
+  - `id`, `name`, `medicineCategory`, `unit`, `quantity`, `price`, `status`, `dosage`, `description`
+- Ghi chú hotfix 2026-06-01:
+  - Endpoint đã xử lý an toàn với dữ liệu DB cũ bị lệch kiểu (`bytea`) để tránh 500.
+  - FE phải đọc danh mục thuốc từ `medicineCategory`, không dùng tạm `unit` để phân loại.
 
 ### `GET /api/medicines/{id}`
 

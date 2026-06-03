@@ -2,6 +2,7 @@ package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.dto.DashboardSummaryResponse;
 import com.medcare.clinic_backend.dto.MonthlyPatientResponse;
+import com.medcare.clinic_backend.dto.MonthlyRevenueResponse;
 import com.medcare.clinic_backend.dto.RecentAppointmentResponse;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Invoice;
@@ -42,15 +43,24 @@ public class DashboardService {
         LocalDateTime startOfNextMonth = startOfCurrentMonth.plusMonths(1);
         LocalDateTime startOfPreviousMonth = startOfCurrentMonth.minusMonths(1);
 
-        long totalAppointments = safeLong(() -> appointmentRepository.count());
+        List<Appointment> allAppointments = safeList(() -> appointmentRepository.findAll());
+
+        long totalAppointments = allAppointments.stream()
+                .filter(Objects::nonNull)
+                .filter(appointment -> !isCancelledStatus(appointment.getStatus()))
+                .count();
         long activePatients = countDistinctActivePatientsOverall();
         long workingDoctors = safeLong(() -> doctorRepository.countByIsActiveTrue());
 
-        long currentMonthAppointments = safeLong(() ->
-                appointmentRepository.countByAppointmentDateBetween(startOfCurrentMonth, startOfNextMonth)
+        long currentMonthAppointments = countAppointmentsBetweenExcludingCancelled(
+                allAppointments,
+                startOfCurrentMonth,
+                startOfNextMonth
         );
-        long previousMonthAppointments = safeLong(() ->
-                appointmentRepository.countByAppointmentDateBetween(startOfPreviousMonth, startOfCurrentMonth)
+        long previousMonthAppointments = countAppointmentsBetweenExcludingCancelled(
+                allAppointments,
+                startOfPreviousMonth,
+                startOfCurrentMonth
         );
         int appointmentGrowthPercent = calculateGrowthPercent(currentMonthAppointments, previousMonthAppointments);
 
@@ -123,6 +133,47 @@ public class DashboardService {
             int month = i + 1;
             long total = uniquePatientsByMonth.getOrDefault(month, Collections.emptySet()).size();
             monthly.get(i).setTotal(total);
+        }
+        return monthly;
+    }
+
+    public List<MonthlyRevenueResponse> getMonthlyRevenue(Integer year) {
+        int targetYear = year == null ? LocalDateTime.now().getYear() : year;
+        List<MonthlyRevenueResponse> monthly = init12MonthRevenue();
+        Map<Integer, Double> revenueByMonth = new HashMap<>();
+
+        for (Invoice invoice : safeList(() -> invoiceRepository.findAll())) {
+            if (invoice == null || invoice.getCreatedAt() == null) {
+                continue;
+            }
+            if (invoice.getCreatedAt().getYear() != targetYear) {
+                continue;
+            }
+            if (!isPaidInvoiceStatus(invoice.getStatus())) {
+                continue;
+            }
+            int month = invoice.getCreatedAt().getMonthValue();
+            revenueByMonth.merge(month, safeDouble(invoice.getTotalAmount()), Double::sum);
+        }
+
+        for (ServicePackageBooking booking : safeList(() -> servicePackageBookingRepository.findAll())) {
+            if (booking == null) {
+                continue;
+            }
+            LocalDateTime paidTime = booking.getUpdatedAt() != null ? booking.getUpdatedAt() : booking.getCreatedAt();
+            if (paidTime == null || paidTime.getYear() != targetYear) {
+                continue;
+            }
+            if (!isPaidBooking(booking)) {
+                continue;
+            }
+            int month = paidTime.getMonthValue();
+            revenueByMonth.merge(month, safeDouble(booking.getTotalAmount()), Double::sum);
+        }
+
+        for (int i = 0; i < monthly.size(); i++) {
+            int month = i + 1;
+            monthly.get(i).setRevenue(roundToOneDecimal(revenueByMonth.getOrDefault(month, 0.0)));
         }
         return monthly;
     }
@@ -280,24 +331,24 @@ public class DashboardService {
             totalRevenue += safeDouble(booking.getTotalAmount());
         }
 
-        if (totalRevenue > 0) {
-            return totalRevenue;
-        }
+        return totalRevenue;
+    }
 
-        double appointmentRevenueFallback = 0.0;
-        for (Appointment appointment : safeList(() -> appointmentRepository.findAll())) {
-            if (appointment == null || appointment.getAppointmentDate() == null) {
-                continue;
-            }
-            if (appointment.getAppointmentDate().isBefore(start) || !appointment.getAppointmentDate().isBefore(end)) {
-                continue;
-            }
-            if (!isCompletedStatus(appointment.getStatus())) {
-                continue;
-            }
-            appointmentRevenueFallback += safeDouble(appointment.getConsultationFee());
+    private long countAppointmentsBetweenExcludingCancelled(
+            List<Appointment> appointments,
+            LocalDateTime start,
+            LocalDateTime end
+    ) {
+        if (appointments == null || appointments.isEmpty()) {
+            return 0;
         }
-        return appointmentRevenueFallback;
+        return appointments.stream()
+                .filter(Objects::nonNull)
+                .filter(appointment -> appointment.getAppointmentDate() != null)
+                .filter(appointment -> !appointment.getAppointmentDate().isBefore(start))
+                .filter(appointment -> appointment.getAppointmentDate().isBefore(end))
+                .filter(appointment -> !isCancelledStatus(appointment.getStatus()))
+                .count();
     }
 
     private List<MonthlyPatientResponse> init12Months() {
@@ -308,20 +359,28 @@ public class DashboardService {
         return monthly;
     }
 
+    private List<MonthlyRevenueResponse> init12MonthRevenue() {
+        List<MonthlyRevenueResponse> monthly = new ArrayList<>();
+        for (int month = 1; month <= 12; month++) {
+            monthly.add(new MonthlyRevenueResponse("Thang " + month, 0.0));
+        }
+        return monthly;
+    }
+
     private String mapStatus(String statusCode) {
         if (statusCode == null) {
-            return "Cho kham";
+            return "Ch\u01b0a kh\u00e1m";
         }
         if ("CANCELLED".equals(statusCode)) {
-            return "Huy lich";
+            return "H\u1ee7y l\u1ecbch";
         }
         if ("COMPLETED".equals(statusCode)) {
-            return "Da kham";
+            return "\u0110\u00e3 kh\u00e1m";
         }
         if ("CONFIRMED".equals(statusCode)) {
-            return "Da xac nhan";
+            return "\u0110\u00e3 x\u00e1c nh\u1eadn";
         }
-        return "Cho kham";
+        return "Ch\u01b0a kh\u00e1m";
     }
 
     private String resolveStatusCode(String rawStatus) {
@@ -431,6 +490,10 @@ public class DashboardService {
 
     private double safeDouble(Double value) {
         return value == null ? 0 : value;
+    }
+
+    private double roundToOneDecimal(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 
     private <T> List<T> safeList(SupplierWithException<List<T>> supplier) {

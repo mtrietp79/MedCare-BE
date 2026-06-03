@@ -29,13 +29,21 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        if (accountRepository.findByUsername(adminUsername).isEmpty()) {
+        accountRepository.findByUsername(adminUsername).ifPresentOrElse(existingAdmin -> {
+            String currentRole = existingAdmin.getRole() == null ? "" : existingAdmin.getRole().trim().toUpperCase();
+            String normalizedRole = currentRole.startsWith("ROLE_") ? currentRole : "ROLE_" + currentRole;
+            if (!"ROLE_ADMIN".equals(normalizedRole)) {
+                existingAdmin.setRole("ROLE_ADMIN");
+                accountRepository.save(existingAdmin);
+                logger.warn("Da chuan hoa role tai khoan admin '{}' ve ROLE_ADMIN", adminUsername);
+            }
+        }, () -> {
             Account admin = new Account();
             admin.setUsername(adminUsername);
             admin.setPassword(passwordEncoder.encode(adminPassword));
             admin.setRole("ROLE_ADMIN");
             accountRepository.save(admin);
             logger.info("Da tao tai khoan admin mac dinh: username={}", adminUsername);
-        }
+        });
     }
 }

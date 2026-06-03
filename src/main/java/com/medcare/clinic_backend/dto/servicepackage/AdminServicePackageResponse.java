@@ -20,5 +20,14 @@ public class AdminServicePackageResponse {
     private Boolean isActive;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private Long totalBooked;
+    private Long totalCompleted;
+    private Long totalPaid;
+    private Long totalPending;
+    private Integer itemCount;
+    private String status;
+    private String statusDisplay;
+    private Boolean hasBookings;
+    private Boolean canDelete;
     private List<PublicServicePackageDetailResponse.Item> items;
 }
