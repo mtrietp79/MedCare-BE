@@ -20,9 +20,13 @@ public class ServicePackageBookingDetailResponse {
     private LocalTime bookingTime;
     private String note;
     private Double totalAmount;
+    private String invoiceCategory;
+    private String invoiceCategoryDisplay;
     private String paymentStatus;
     private String status;
     private String invoiceCode;
+    private Boolean canPayOnline;
+    private LocalDateTime paymentDate;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

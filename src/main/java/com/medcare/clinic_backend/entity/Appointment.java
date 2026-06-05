@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -14,6 +15,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 
+import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.Locale;
 
@@ -60,6 +62,7 @@ public class Appointment {
     @JoinColumn(name = "parent_appointment_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private Appointment parentAppointment;
 
     @Column(name = "follow_up_note", columnDefinition = "TEXT")
@@ -99,6 +102,14 @@ public class Appointment {
         return medicalService == null ? "Kham benh" : safeText(medicalService.getName());
     }
 
+    public String getAppointmentType() {
+        return normalizeAppointmentType(appointmentType);
+    }
+
+    public String getAppointmentTypeDisplay() {
+        return normalizeAppointmentType(appointmentType);
+    }
+
     public String getStatusDisplay() {
         String normalized = normalizeStatus(status);
         return switch (normalized) {
@@ -125,6 +136,10 @@ public class Appointment {
             case "COMPLETED" -> "green";
             default -> "yellow";
         };
+    }
+
+    public Integer getParentAppointmentId() {
+        return parentAppointment == null ? null : parentAppointment.getId();
     }
 
     private String normalizeStatus(String rawStatus) {
@@ -159,6 +174,22 @@ public class Appointment {
             return "PENDING";
         }
         return "UNPAID";
+    }
+
+    private String normalizeAppointmentType(String rawType) {
+        if (rawType == null || rawType.isBlank()) {
+            return "Kh\u00e1m b\u1ec7nh";
+        }
+        String folded = Normalizer.normalize(rawType, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replace('\u0111', 'd')
+                .replace('\u0110', 'D')
+                .replace(" ", "");
+        if (folded.contains("taikham")) {
+            return "T\u00e1i kh\u00e1m";
+        }
+        return "Kh\u00e1m b\u1ec7nh";
     }
 
     private String safeText(String value) {

@@ -15,6 +15,12 @@ public class DoctorMedicalRecordPatientItemResponse {
     private String phone;
     private String email;
     private String gender;
-    private long visitCount;
+    private long newExamCount;
+    private long followUpCount;
+    private long totalVisitCount;
     private LocalDate latestVisitDate;
+
+    public long getVisitCount() {
+        return totalVisitCount;
+    }
 }

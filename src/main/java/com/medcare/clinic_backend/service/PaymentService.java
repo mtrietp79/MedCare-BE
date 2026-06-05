@@ -2,7 +2,9 @@ package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.config.VNPayConfig;
 import com.medcare.clinic_backend.dto.payment.AppointmentPaymentReceiptResponse;
+import com.medcare.clinic_backend.dto.payment.InvoicePaymentReceiptResponse;
 import com.medcare.clinic_backend.dto.payment.PaymentReturnResult;
+import com.medcare.clinic_backend.dto.payment.ServicePackagePaymentReceiptResponse;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Invoice;
 import com.medcare.clinic_backend.entity.Patient;
@@ -66,6 +68,12 @@ public class PaymentService {
 
     @Value("${vnpay.appointmentFrontendReturnUrl:}")
     private String appointmentFrontendReturnUrl;
+
+    @Value("${vnpay.servicePackageFrontendReturnUrl:}")
+    private String servicePackageFrontendReturnUrl;
+
+    @Value("${vnpay.invoiceFrontendReturnUrl:}")
+    private String invoiceFrontendReturnUrl;
 
     public long resolvePaymentAmount(Integer appointmentId) {
         Appointment appointment = appointmentRepository.findById(appointmentId)
@@ -207,13 +215,27 @@ public class PaymentService {
         );
     }
 
-    public String createServicePackagePaymentUrl(Integer bookingId, String ipAddress) {
+    public String createServicePackagePaymentUrl(Integer bookingId, String ipAddress, String username) {
         assertVnpayConfiguration();
         if (bookingId == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu bookingId.");
         }
-        ServicePackageBooking booking = servicePackageBookingRepository.findById(bookingId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay dat goi dich vu ID: " + bookingId));
+        ServicePackageBooking booking;
+        if (username == null || username.isBlank()) {
+            booking = servicePackageBookingRepository.findById(bookingId)
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay dat goi dich vu ID: " + bookingId));
+        } else {
+            Patient patient = getCurrentPatientOrThrow(username);
+            booking = servicePackageBookingRepository.findByIdAndPatientId(bookingId, patient.getId())
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay dat goi dich vu ID: " + bookingId));
+        }
+        if ("PAID".equalsIgnoreCase(booking.getPaymentStatus())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Dat goi dich vu nay da duoc thanh toan.");
+        }
+        if ("CANCELLED".equalsIgnoreCase(booking.getPaymentStatus())
+                || "CANCELLED".equalsIgnoreCase(booking.getStatus())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the thanh toan dat goi dich vu da huy.");
+        }
 
         long amount = resolveServicePackageBookingAmount(bookingId);
         String displayCode = booking.getBookingCode() == null ? String.valueOf(bookingId) : booking.getBookingCode();
@@ -282,24 +304,156 @@ public class PaymentService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public ServicePackagePaymentReceiptResponse getServicePackagePaymentReceipt(Integer bookingId, String username) {
+        if (bookingId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu bookingId.");
+        }
+
+        Patient patient = getCurrentPatientOrThrow(username);
+        ServicePackageBooking booking = servicePackageBookingRepository.findByIdAndPatientId(bookingId, patient.getId())
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay dat goi dich vu ID: " + bookingId));
+
+        if (!"PAID".equalsIgnoreCase(booking.getPaymentStatus())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Dat goi dich vu chua thanh toan thanh cong.");
+        }
+
+        TransactionLog paidLog = transactionLogRepository
+                .findTopByServicePackageBookingIdAndResponseCodeOrderByCreatedAtDesc(bookingId, SUCCESS_CODE);
+
+        ServicePackagePaymentReceiptResponse.PatientInfo patientInfo =
+                new ServicePackagePaymentReceiptResponse.PatientInfo(
+                        patient.getFullName(),
+                        patient.getPhone(),
+                        patient.getEmail()
+                );
+
+        ServicePackagePaymentReceiptResponse.BookingInfo bookingInfo =
+                new ServicePackagePaymentReceiptResponse.BookingInfo(
+                        booking.getServicePackage() == null ? null : booking.getServicePackage().getName(),
+                        booking.getServicePackage() == null ? null : booking.getServicePackage().getDescription(),
+                        booking.getBookingDate(),
+                        booking.getBookingTime(),
+                        booking.getStatus(),
+                        booking.getPaymentStatus(),
+                        booking.getTotalAmount(),
+                        booking.getNote()
+                );
+
+        ServicePackagePaymentReceiptResponse.PaymentInfo paymentInfo =
+                new ServicePackagePaymentReceiptResponse.PaymentInfo(
+                        APPOINTMENT_PAYMENT_METHOD,
+                        paidLog == null ? null : paidLog.getVnpTransactionNo(),
+                        paidLog == null ? null : paidLog.getBankCode(),
+                        paidLog == null ? booking.getTotalAmount() : paidLog.getAmount(),
+                        paidLog == null ? null : paidLog.getCreatedAt(),
+                        paidLog == null ? SUCCESS_CODE : paidLog.getResponseCode()
+                );
+
+        return new ServicePackagePaymentReceiptResponse(
+                booking.getId(),
+                booking.getBookingCode(),
+                patientInfo,
+                bookingInfo,
+                paymentInfo
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public InvoicePaymentReceiptResponse getInvoicePaymentReceipt(Integer invoiceId, String username) {
+        if (invoiceId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu invoiceId.");
+        }
+
+        Patient patient = getCurrentPatientOrThrow(username);
+        Invoice invoice = invoiceRepository.findByIdAndMedicalRecordPatientId(invoiceId, patient.getId())
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay hoa don ID: " + invoiceId));
+
+        if (!"PAID".equalsIgnoreCase(invoice.getStatus())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Hoa don chua thanh toan thanh cong.");
+        }
+
+        TransactionLog paidLog = resolvePaidInvoiceLog(invoice.getId());
+        Appointment appointment = invoice.getAppointment() != null
+                ? invoice.getAppointment()
+                : (invoice.getMedicalRecord() == null ? null : invoice.getMedicalRecord().getAppointment());
+        String appointmentType = appointment == null ? "Kh\u00e1m b\u1ec7nh" : appointment.getAppointmentType();
+        boolean followUp = isFollowUpType(appointmentType);
+
+        InvoicePaymentReceiptResponse.PatientInfo patientInfo =
+                new InvoicePaymentReceiptResponse.PatientInfo(
+                        patient.getFullName(),
+                        patient.getPhone(),
+                        patient.getEmail()
+                );
+
+        InvoicePaymentReceiptResponse.InvoiceInfo invoiceInfo =
+                new InvoicePaymentReceiptResponse.InvoiceInfo(
+                        invoice.getMedicalRecord() == null ? null : invoice.getMedicalRecord().getId(),
+                        invoice.getMedicalRecord() == null ? null : invoice.getMedicalRecord().getMedicalRecordCode(),
+                        appointment == null ? null : appointment.getId(),
+                        appointment == null ? null : appointment.getAppointmentCode(),
+                        appointmentType,
+                        appointment == null ? null : appointment.getDoctorName(),
+                        appointment == null ? null : appointment.getSpecialtyName(),
+                        appointment == null ? null : appointment.getServiceName(),
+                        followUp ? "FOLLOW_UP" : "POST_EXAM",
+                        followUp ? "H\u00f3a \u0111\u01a1n t\u00e1i kh\u00e1m" : "H\u00f3a \u0111\u01a1n sau kh\u00e1m",
+                        invoice.getConsultationFee(),
+                        invoice.getMedicineFee(),
+                        invoice.getServiceFee(),
+                        invoice.getTotalAmount(),
+                        invoice.getStatus(),
+                        invoice.getCreatedAt()
+                );
+
+        InvoicePaymentReceiptResponse.PaymentInfo paymentInfo =
+                new InvoicePaymentReceiptResponse.PaymentInfo(
+                        paidLog != null && "MANUAL_PAID".equalsIgnoreCase(paidLog.getResponseCode()) ? "MANUAL" : APPOINTMENT_PAYMENT_METHOD,
+                        paidLog == null ? null : paidLog.getVnpTransactionNo(),
+                        paidLog == null ? null : paidLog.getBankCode(),
+                        paidLog == null ? invoice.getTotalAmount() : paidLog.getAmount(),
+                        paidLog == null ? null : paidLog.getCreatedAt(),
+                        paidLog == null ? SUCCESS_CODE : paidLog.getResponseCode()
+                );
+
+        return new InvoicePaymentReceiptResponse(
+                invoice.getId(),
+                invoiceTxnCode(invoice.getId()),
+                patientInfo,
+                invoiceInfo,
+                paymentInfo
+        );
+    }
+
     public String buildAppointmentFrontendReturnUrl(Integer appointmentId, PaymentReturnResult result) {
-        if (appointmentFrontendReturnUrl == null || appointmentFrontendReturnUrl.isBlank()) {
-            return null;
-        }
-        if (appointmentId == null || result == null) {
-            return appointmentFrontendReturnUrl;
-        }
+        return buildFrontendReturnUrl(
+                appointmentFrontendReturnUrl,
+                "APPOINTMENT",
+                "appointmentId",
+                appointmentId,
+                result
+        );
+    }
 
-        String separator = appointmentFrontendReturnUrl.contains("?") ? "&" : "?";
-        String status = result.success() ? "SUCCESS" : "FAILED";
-        String encodedMessage = encodeQueryValue(result.message());
-        String encodedResponseCode = encodeQueryValue(result.responseCode());
+    public String buildServicePackageFrontendReturnUrl(Integer bookingId, PaymentReturnResult result) {
+        return buildFrontendReturnUrl(
+                servicePackageFrontendReturnUrl,
+                "SERVICE_PACKAGE",
+                "bookingId",
+                bookingId,
+                result
+        );
+    }
 
-        return appointmentFrontendReturnUrl
-                + separator + "appointmentId=" + appointmentId
-                + "&status=" + status
-                + "&responseCode=" + encodedResponseCode
-                + "&message=" + encodedMessage;
+    public String buildInvoiceFrontendReturnUrl(Integer invoiceId, PaymentReturnResult result) {
+        return buildFrontendReturnUrl(
+                invoiceFrontendReturnUrl,
+                "INVOICE",
+                "invoiceId",
+                invoiceId,
+                result
+        );
     }
 
     @Transactional
@@ -439,9 +593,15 @@ public class PaymentService {
         saveTransactionLogForServicePackage(vnpParams, bookingId, responseCode, parseAmount(vnpAmountRaw));
 
         if (SUCCESS_CODE.equals(responseCode)) {
+            boolean shouldSendMail = !"PAID".equalsIgnoreCase(booking.getPaymentStatus());
             booking.setPaymentStatus("PAID");
             booking.setStatus("PAID");
-            servicePackageBookingRepository.save(booking);
+            ServicePackageBooking savedBooking = servicePackageBookingRepository.save(booking);
+            if (shouldSendMail) {
+                TransactionLog paidLog = transactionLogRepository
+                        .findTopByServicePackageBookingIdAndResponseCodeOrderByCreatedAtDesc(bookingId, SUCCESS_CODE);
+                appointmentNotificationService.sendServicePackagePaymentReceipt(savedBooking, paidLog);
+            }
             return new PaymentReturnResult(
                     true,
                     "THANH TOAN THANH CONG! Dat goi dich vu da duoc cap nhat.",
@@ -512,8 +672,13 @@ public class PaymentService {
         saveTransactionLogForInvoice(vnpParams, invoiceId, responseCode, parseAmount(vnpAmountRaw));
 
         if (SUCCESS_CODE.equals(responseCode)) {
+            boolean shouldSendMail = !"PAID".equalsIgnoreCase(invoice.getStatus());
             invoice.setStatus("PAID");
-            invoiceRepository.save(invoice);
+            Invoice savedInvoice = invoiceRepository.save(invoice);
+            if (shouldSendMail) {
+                TransactionLog paidLog = resolvePaidInvoiceLog(invoiceId);
+                appointmentNotificationService.sendInvoicePaymentReceipt(savedInvoice, paidLog);
+            }
             return new PaymentReturnResult(
                     true,
                     "THANH TOAN THANH CONG! Hoa don da duoc cap nhat.",
@@ -601,6 +766,34 @@ public class PaymentService {
         return vnpReturnUrl + separator + key + "=" + value;
     }
 
+    private String buildFrontendReturnUrl(
+            String baseUrl,
+            String resourceType,
+            String idKey,
+            Integer resourceId,
+            PaymentReturnResult result
+    ) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return null;
+        }
+        if (resourceId == null || result == null) {
+            return baseUrl;
+        }
+
+        String separator = baseUrl.contains("?") ? "&" : "?";
+        String status = result.success() ? "SUCCESS" : "FAILED";
+        String encodedMessage = encodeQueryValue(result.message());
+        String encodedResponseCode = encodeQueryValue(result.responseCode());
+        String encodedResourceType = encodeQueryValue(resourceType);
+
+        return baseUrl
+                + separator + idKey + "=" + resourceId
+                + "&resourceType=" + encodedResourceType
+                + "&status=" + status
+                + "&responseCode=" + encodedResponseCode
+                + "&message=" + encodedMessage;
+    }
+
     private void assertVnpayConfiguration() {
         if (vnpTmnCode == null || vnpTmnCode.isBlank()
                 || secretKey == null || secretKey.isBlank()
@@ -616,6 +809,13 @@ public class PaymentService {
 
     private String invoiceTxnRef(Integer invoiceId) {
         return INVOICE_TXN_PREFIX + invoiceId;
+    }
+
+    private String invoiceTxnCode(Integer invoiceId) {
+        if (invoiceId == null) {
+            return null;
+        }
+        return "INV" + String.format("%06d", invoiceId);
     }
 
     private Patient getCurrentPatientOrThrow(String username) {
@@ -746,6 +946,18 @@ public class PaymentService {
         } catch (NumberFormatException ex) {
             return 0.0;
         }
+    }
+
+    private TransactionLog resolvePaidInvoiceLog(Integer invoiceId) {
+        if (invoiceId == null) {
+            return null;
+        }
+        TransactionLog successLog = transactionLogRepository
+                .findTopByInvoiceIdAndResponseCodeOrderByCreatedAtDesc(invoiceId, SUCCESS_CODE);
+        if (successLog != null) {
+            return successLog;
+        }
+        return transactionLogRepository.findTopByInvoiceIdAndResponseCodeOrderByCreatedAtDesc(invoiceId, "MANUAL_PAID");
     }
 
     private boolean isAppointmentPaidOnline(String paymentStatus) {

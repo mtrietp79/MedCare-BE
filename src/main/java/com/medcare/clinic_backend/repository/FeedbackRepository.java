@@ -20,6 +20,8 @@ public interface FeedbackRepository extends JpaRepository<Feedback, Integer> {
 
     long countByDoctorId(Integer doctorId);
 
+    void deleteByDoctorId(Integer doctorId);
+
     @Query("SELECT AVG(f.rating) FROM Feedback f WHERE f.doctor.id = :doctorId")
     Double findAverageRatingByDoctorId(@Param("doctorId") Integer doctorId);
 }

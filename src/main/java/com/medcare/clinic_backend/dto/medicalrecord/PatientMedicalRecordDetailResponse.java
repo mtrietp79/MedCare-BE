@@ -85,6 +85,8 @@ public class PatientMedicalRecordDetailResponse {
     public static class InvoiceInfo {
         private Integer id;
         private String invoiceCode;
+        private String invoiceCategory;
+        private String invoiceCategoryDisplay;
         private String status;
         private Double consultationFee;
         private Double medicineFee;
@@ -92,6 +94,7 @@ public class PatientMedicalRecordDetailResponse {
         private Double totalAmount;
         private Boolean canPayOnline;
         private LocalDateTime createdAt;
+        private LocalDateTime paymentDate;
     }
 
     @Data

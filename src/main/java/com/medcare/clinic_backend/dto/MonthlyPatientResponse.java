@@ -23,4 +23,8 @@ public class MonthlyPatientResponse {
     public long getPatients() {
         return total;
     }
+
+    public String getLabel() {
+        return month;
+    }
 }

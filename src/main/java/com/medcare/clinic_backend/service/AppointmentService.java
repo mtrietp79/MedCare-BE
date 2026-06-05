@@ -100,7 +100,9 @@ public class AppointmentService {
             );
         }
         if (app.getAppointmentType() == null || app.getAppointmentType().isBlank()) {
-            app.setAppointmentType("Khám bệnh");
+            app.setAppointmentType("Kh\u00e1m b\u1ec7nh");
+        } else {
+            app.setAppointmentType(isFollowUpType(app.getAppointmentType()) ? "T\u00e1i kh\u00e1m" : "Kh\u00e1m b\u1ec7nh");
         }
         app.setPaymentStatus("UNPAID");
         app.setAppointmentCode(generateAppointmentCode());
@@ -262,7 +264,9 @@ public class AppointmentService {
         }
 
         if (appointmentDetails.getAppointmentType() != null && !appointmentDetails.getAppointmentType().isBlank()) {
-            appointment.setAppointmentType(appointmentDetails.getAppointmentType().trim());
+            appointment.setAppointmentType(
+                    isFollowUpType(appointmentDetails.getAppointmentType()) ? "T\u00e1i kh\u00e1m" : "Kh\u00e1m b\u1ec7nh"
+            );
         }
 
         applyAppointmentPricing(appointment, targetDoctor);
@@ -701,3 +705,4 @@ public class AppointmentService {
     private record SlotRule(LocalDate date, LocalDateTime start, LocalDateTime end, String shift, int maxPatients) {
     }
 }
+

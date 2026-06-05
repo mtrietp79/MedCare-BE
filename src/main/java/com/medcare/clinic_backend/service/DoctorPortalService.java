@@ -73,10 +73,16 @@ public class DoctorPortalService {
     @Autowired
     private MedicineService medicineService;
 
+    @Autowired
+    private DoctorScheduleRepository doctorScheduleRepository;
+
     private static final String PAYMENT_STATUS_UNPAID = "UNPAID";
     private static final String PAYMENT_STATUS_PAID = "PAID";
     private static final String PAYMENT_STATUS_PAID_ONLINE = "PAID_ONLINE";
+    private static final String FOLLOW_UP_VALIDATION_CODE = "FOLLOW_UP_VALIDATION_ERROR";
 
+    private static final DateTimeFormatter FOLLOW_UP_DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE;
+    private static final DateTimeFormatter FOLLOW_UP_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
     private static final DateTimeFormatter TIME_LABEL_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
     public DoctorDashboardResponse getDashboard(String username) {
@@ -174,12 +180,16 @@ public class DoctorPortalService {
                 appointmentDateTime == null ? null : appointmentDateTime.toLocalDate(),
                 appointmentDateTime == null ? null : appointmentDateTime.toLocalTime(),
                 formatTimeLabel(appointmentDateTime == null ? null : appointmentDateTime.toLocalTime()),
-                resolveDisplayType(appointment.getAppointmentType()),
+                resolveDisplayType(appointment),
+                resolveTypeCode(appointment),
                 resolveDisplayStatus(appointment.getStatus()),
                 resolvePaymentStatusDisplay(appointment.getPaymentStatus()),
                 appointment.getConsultationFee(),
-                appointment.getNotes(),
-                appointment.getSymptoms()
+                resolveAppointmentNoteForDetail(appointment),
+                resolveAppointmentSymptomsForDetail(appointment),
+                resolveFollowUpNote(appointment),
+                resolveParentAppointmentId(appointment),
+                isFollowUpAppointment(appointment)
         );
     }
 
@@ -328,18 +338,28 @@ public class DoctorPortalService {
     public DoctorMedicalRecordsSummaryResponse getMedicalRecordSummary(String username) {
         Doctor doctor = getDoctorByUsername(username);
         List<MedicalRecord> records = medicalRecordRepository.findByDoctorIdOrderByExaminationDateDesc(doctor.getId());
+        Set<Integer> patientIdsWithRecords = extractPatientIdsWithRecords(records);
 
-        Map<Integer, Long> visitsByPatient = records.stream()
-                .filter(record -> record.getPatient() != null && record.getPatient().getId() != null)
-                .collect(Collectors.groupingBy(record -> record.getPatient().getId(), Collectors.counting()));
+        if (patientIdsWithRecords.isEmpty()) {
+            return new DoctorMedicalRecordsSummaryResponse(0, 0, 0);
+        }
 
-        long totalPatients = visitsByPatient.size();
-        long newPatients = visitsByPatient.values().stream().filter(count -> count == 1).count();
-        long followUpPatients = appointmentRepository.findByDoctorIdOrderByAppointmentDateDesc(doctor.getId()).stream()
-                .filter(appointment -> "T\u00e1i kh\u00e1m".equals(resolveDisplayType(appointment.getAppointmentType())))
-                .map(appointment -> appointment.getPatient() == null ? null : appointment.getPatient().getId())
+        Map<Integer, PatientVisitStats> visitStatsByPatient = buildPatientVisitStats(
+                appointmentRepository.findByDoctorIdOrderByAppointmentDateDesc(doctor.getId()),
+                records,
+                patientIdsWithRecords
+        );
+
+        long totalPatients = patientIdsWithRecords.size();
+        long newPatients = patientIdsWithRecords.stream()
+                .map(visitStatsByPatient::get)
                 .filter(Objects::nonNull)
-                .distinct()
+                .filter(stats -> stats.newExamCount() > 0)
+                .count();
+        long followUpPatients = patientIdsWithRecords.stream()
+                .map(visitStatsByPatient::get)
+                .filter(Objects::nonNull)
+                .filter(stats -> stats.followUpCount() > 0)
                 .count();
 
         return new DoctorMedicalRecordsSummaryResponse(totalPatients, newPatients, followUpPatients);
@@ -353,6 +373,11 @@ public class DoctorPortalService {
         Map<Integer, List<MedicalRecord>> recordsByPatient = records.stream()
                 .filter(record -> record.getPatient() != null && record.getPatient().getId() != null)
                 .collect(Collectors.groupingBy(record -> record.getPatient().getId()));
+        Map<Integer, PatientVisitStats> visitStatsByPatient = buildPatientVisitStats(
+                appointmentRepository.findByDoctorIdOrderByAppointmentDateDesc(doctor.getId()),
+                records,
+                recordsByPatient.keySet()
+        );
 
         List<DoctorMedicalRecordPatientItemResponse> result = new ArrayList<>();
         for (Map.Entry<Integer, List<MedicalRecord>> entry : recordsByPatient.entrySet()) {
@@ -361,11 +386,15 @@ public class DoctorPortalService {
                 continue;
             }
 
-            LocalDate latestVisit = entry.getValue().stream()
+            LocalDate latestRecordDate = entry.getValue().stream()
                     .map(MedicalRecord::getExaminationDate)
                     .filter(Objects::nonNull)
                     .max(LocalDate::compareTo)
                     .orElse(null);
+            PatientVisitStats visitStats = visitStatsByPatient.getOrDefault(
+                    patient.getId(),
+                    new PatientVisitStats(0, 0, latestRecordDate)
+            );
 
             result.add(new DoctorMedicalRecordPatientItemResponse(
                     patient.getId(),
@@ -373,8 +402,10 @@ public class DoctorPortalService {
                     patient.getPhone(),
                     patient.getEmail(),
                     patient.getGender(),
-                    entry.getValue().size(),
-                    latestVisit
+                    visitStats.newExamCount(),
+                    visitStats.followUpCount(),
+                    visitStats.totalVisitCount(),
+                    visitStats.latestVisitDate() == null ? latestRecordDate : visitStats.latestVisitDate()
             ));
         }
 
@@ -383,6 +414,109 @@ public class DoctorPortalService {
                 Comparator.nullsLast(Comparator.reverseOrder())
         ));
         return result;
+    }
+
+    private Set<Integer> extractPatientIdsWithRecords(List<MedicalRecord> records) {
+        return records.stream()
+                .map(MedicalRecord::getPatient)
+                .filter(Objects::nonNull)
+                .map(Patient::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+    }
+
+    private Map<Integer, PatientVisitStats> buildPatientVisitStats(
+            List<Appointment> appointments,
+            List<MedicalRecord> fallbackRecords,
+            Set<Integer> patientIds
+    ) {
+        if (patientIds == null || patientIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Integer, Long> newExamCounts = new HashMap<>();
+        Map<Integer, Long> followUpCounts = new HashMap<>();
+        Map<Integer, LocalDate> latestVisitDates = new HashMap<>();
+        Set<Integer> patientsCountedFromAppointments = new HashSet<>();
+
+        for (Appointment appointment : appointments) {
+            Integer patientId = appointment == null || appointment.getPatient() == null
+                    ? null
+                    : appointment.getPatient().getId();
+            if (patientId == null || !patientIds.contains(patientId) || isCancelledForDoctorFlow(appointment)) {
+                continue;
+            }
+
+            if (isFollowUpAppointment(appointment)) {
+                followUpCounts.merge(patientId, 1L, Long::sum);
+            } else {
+                newExamCounts.merge(patientId, 1L, Long::sum);
+            }
+
+            patientsCountedFromAppointments.add(patientId);
+            mergeLatestVisitDate(
+                    latestVisitDates,
+                    patientId,
+                    appointment.getAppointmentDate() == null ? null : appointment.getAppointmentDate().toLocalDate()
+            );
+        }
+
+        for (MedicalRecord record : fallbackRecords) {
+            Integer patientId = record == null || record.getPatient() == null
+                    ? null
+                    : record.getPatient().getId();
+            if (patientId == null || !patientIds.contains(patientId)) {
+                continue;
+            }
+
+            if (!patientsCountedFromAppointments.contains(patientId)) {
+                if (isFollowUpRecord(record)) {
+                    followUpCounts.merge(patientId, 1L, Long::sum);
+                } else {
+                    newExamCounts.merge(patientId, 1L, Long::sum);
+                }
+            }
+
+            mergeLatestVisitDate(latestVisitDates, patientId, record.getExaminationDate());
+        }
+
+        Map<Integer, PatientVisitStats> statsByPatient = new HashMap<>();
+        for (Integer patientId : patientIds) {
+            long newExamCount = newExamCounts.getOrDefault(patientId, 0L);
+            long followUpCount = followUpCounts.getOrDefault(patientId, 0L);
+            statsByPatient.put(
+                    patientId,
+                    new PatientVisitStats(newExamCount, followUpCount, latestVisitDates.get(patientId))
+            );
+        }
+        return statsByPatient;
+    }
+
+    private boolean isFollowUpRecord(MedicalRecord record) {
+        if (record == null) {
+            return false;
+        }
+        if (record.getAppointment() != null) {
+            return isFollowUpAppointment(record.getAppointment());
+        }
+        return isFollowUpType(record.getType());
+    }
+
+    private LocalDate resolveLatestDate(LocalDate current, LocalDate candidate) {
+        if (current == null) {
+            return candidate;
+        }
+        if (candidate == null) {
+            return current;
+        }
+        return candidate.isAfter(current) ? candidate : current;
+    }
+
+    private void mergeLatestVisitDate(Map<Integer, LocalDate> latestVisitDates, Integer patientId, LocalDate candidate) {
+        if (candidate == null) {
+            return;
+        }
+        latestVisitDates.merge(patientId, candidate, this::resolveLatestDate);
     }
 
     @Transactional(readOnly = true)
@@ -431,12 +565,14 @@ public class DoctorPortalService {
                     appointment == null ? null : appointment.getId(),
                     resolveRecordCreatedAt(record),
                     record.getExaminationDate(),
-                    appointment == null ? TYPE_NEW_EXAM : resolveDisplayType(appointment.getAppointmentType()),
-                    appointment == null ? null : appointment.getSymptoms(),
+                    appointment == null ? "Kh\u00e1m b\u1ec7nh" : resolveDisplayType(appointment),
+                    appointment == null ? "NEW_EXAM" : resolveTypeCode(appointment),
+                    appointment == null ? null : resolveAppointmentSymptomsForDetail(appointment),
                     record.getDiagnosis(),
                     record.getDoctorAdvice(),
                     medicines,
-                    services
+                    services,
+                    toDoctorFollowUpAppointmentInfo(record.getFollowUpAppointment())
             ));
         }
 
@@ -463,35 +599,43 @@ public class DoctorPortalService {
     @Transactional
     public CreateFollowUpResponse createFollowUp(String username, Integer recordId, CreateFollowUpRequest request) {
         Doctor doctor = getDoctorByUsername(username);
-        MedicalRecord record = medicalRecordRepository.findByIdAndDoctorId(recordId, doctor.getId())
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay benh an."));
+        MedicalRecord record = medicalRecordRepository.findById(recordId)
+                .orElseThrow(() -> buildFollowUpValidationException("Khong tim thay benh an."));
 
-        if (request == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Du lieu tai kham khong hop le.");
+        if (record.getDoctor() == null || record.getDoctor().getId() == null
+                || !doctor.getId().equals(record.getDoctor().getId())) {
+            throw buildFollowUpValidationException("Benh an nay khong thuoc bac si hien tai.");
         }
-        LocalDate followUpDate = parseFlexibleDate(request.getFollowUpDate(), "ngay tai kham");
-        LocalTime followUpTime = parseFlexibleTime(request.getFollowUpTime(), "gio tai kham");
+
+        Appointment sourceAppointment = record.getAppointment();
+        if (sourceAppointment == null) {
+            throw buildFollowUpValidationException("Benh an khong hop le de tao lich tai kham.");
+        }
+        if (sourceAppointment.getId() == null) {
+            throw buildFollowUpValidationException("Benh an khong hop le de tao lich tai kham.");
+        }
+        if (record.getFollowUpAppointment() != null || appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())) {
+            throw buildFollowUpValidationException("Benh an nay da ton tai lich tai kham.");
+        }
+
+        FollowUpRequestPayload payload = validateCreateFollowUpRequest(request);
         Appointment followUp = createFollowUpAppointment(
-                record.getAppointment(),
-                followUpDate,
-                followUpTime,
-                request.getNote()
+                sourceAppointment,
+                payload.followUpDate(),
+                payload.followUpTime(),
+                payload.note()
         );
         record.setFollowUpAppointment(followUp);
         medicalRecordRepository.save(record);
 
         return new CreateFollowUpResponse(
                 followUp.getId(),
-                followUp.getPatient() == null ? null : followUp.getPatient().getId(),
-                followUp.getDoctor() == null ? null : followUp.getDoctor().getId(),
                 followUp.getAppointmentDate() == null ? null : followUp.getAppointmentDate().toLocalDate(),
                 followUp.getAppointmentDate() == null ? null : followUp.getAppointmentDate().toLocalTime(),
                 resolveDisplayType(followUp.getAppointmentType()),
                 resolveDisplayStatus(followUp.getStatus()),
-                followUp.getConsultationFee(),
                 resolvePaymentStatusDisplay(followUp.getPaymentStatus()),
-                trimToNull(followUp.getFollowUpNote()) == null ? followUp.getNotes() : followUp.getFollowUpNote(),
-                followUp.getParentAppointment() == null ? null : followUp.getParentAppointment().getId()
+                followUp.getConsultationFee()
         );
     }
 
@@ -577,8 +721,11 @@ public class DoctorPortalService {
                         appointment.getPatientName(),
                         appointment.getAppointmentDate().toLocalTime(),
                         formatTimeLabel(appointment.getAppointmentDate().toLocalTime()),
-                        resolveDisplayType(appointment.getAppointmentType()),
-                        resolveDisplayStatus(appointment.getStatus())
+                        resolveDisplayType(appointment),
+                        resolveTypeCode(appointment),
+                        resolveDisplayStatus(appointment.getStatus()),
+                        isFollowUpAppointment(appointment),
+                        resolveParentAppointmentId(appointment)
                 ))
                 .collect(Collectors.toList());
     }
@@ -719,25 +866,35 @@ public class DoctorPortalService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the tao tai kham cho lich da huy.");
         }
         if (followUpDate == null || followUpTime == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Vui long cung cap ngay va gio tai kham.");
+            throw buildFollowUpValidationException(
+                    "Vui long cung cap ngay va gio tai kham.",
+                    Map.of(
+                            "followUpDate", "Vui long cung cap followUpDate theo dinh dang yyyy-MM-dd.",
+                            "followUpTime", "Vui long cung cap followUpTime theo dinh dang HH:mm."
+                    )
+            );
         }
         if (appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich kham nay da co lich tai kham truc tiep.");
+            throw buildFollowUpValidationException("Da ton tai lich tai kham cho benh an nay.");
         }
 
-        LocalDateTime followUpDateTime = LocalDateTime.of(followUpDate, followUpTime);
         if (followUpDate.isBefore(LocalDate.now())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ngay tai kham khong duoc la ngay trong qua khu.");
+            throw buildFollowUpValidationException(
+                    "Ngay tai kham khong duoc o qua khu.",
+                    Map.of("followUpDate", "Ngay tai kham khong duoc o qua khu.")
+            );
         }
+        SlotRule slotRule = resolveFollowUpSlotRule(followUpDate, followUpTime);
+        LocalDateTime followUpDateTime = slotRule.start();
         if (followUpDateTime.isBefore(LocalDateTime.now())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the tao lich tai kham trong qua khu.");
+            throw buildFollowUpValidationException(
+                    "Thoi gian tai kham khong duoc o qua khu.",
+                    Map.of("followUpTime", "Thoi gian tai kham khong duoc o qua khu.")
+            );
         }
-        if (hasActiveAppointmentAt(
-                sourceAppointment.getDoctor() == null ? null : sourceAppointment.getDoctor().getId(),
-                followUpDateTime
-        )) {
-            throw new BusinessException(HttpStatus.CONFLICT, "Bac si da co lich kham trong khung ngay gio nay.");
-        }
+        Integer doctorId = sourceAppointment.getDoctor() == null ? null : sourceAppointment.getDoctor().getId();
+        validateDoctorScheduleForFollowUp(doctorId, slotRule);
+        validateDoctorAvailabilityForFollowUp(doctorId, slotRule);
 
         Appointment followUp = new Appointment();
         followUp.setPatient(sourceAppointment.getPatient());
@@ -751,8 +908,8 @@ public class DoctorPortalService {
         followUp.setStatus(STATUS_PENDING);
         followUp.setPaymentStatus(PAYMENT_STATUS_UNPAID);
         followUp.setFollowUpNote(trimToNull(note));
-        followUp.setNotes(trimToNull(note));
-        followUp.setSymptoms(null);
+        followUp.setNotes(null);
+        followUp.setSymptoms(resolveSeedSymptomsForFollowUp(sourceAppointment));
         followUp.setConsultationFee(resolveConsultationFeeByType("T\u00e1i kh\u00e1m", sourceAppointment.getDoctor()));
         followUp.setAppointmentCode(generateAppointmentCode());
         return appointmentRepository.save(followUp);
@@ -775,13 +932,220 @@ public class DoctorPortalService {
         return normalized != null && normalized.contains("taikham");
     }
 
-    private boolean hasActiveAppointmentAt(Integer doctorId, LocalDateTime appointmentDateTime) {
-        if (doctorId == null || appointmentDateTime == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thong tin bac si hoac lich hen khong hop le.");
+    private boolean isFollowUpAppointment(Appointment appointment) {
+        if (appointment == null) {
+            return false;
         }
-        return appointmentRepository.findByDoctorIdAndAppointmentDate(doctorId, appointmentDateTime)
-                .stream()
-                .anyMatch(appointment -> !isCancelledForDoctorFlow(appointment));
+        if (isFollowUpType(appointment.getAppointmentType())) {
+            return true;
+        }
+        if (resolveParentAppointmentId(appointment) != null) {
+            return true;
+        }
+        return trimToNull(appointment.getFollowUpNote()) != null;
+    }
+
+    private Integer resolveParentAppointmentId(Appointment appointment) {
+        if (appointment == null || appointment.getParentAppointment() == null) {
+            return null;
+        }
+        return appointment.getParentAppointment().getId();
+    }
+
+    private String resolveTypeCode(Appointment appointment) {
+        return isFollowUpAppointment(appointment) ? "FOLLOW_UP" : "NEW_EXAM";
+    }
+
+    private String resolveFollowUpNote(Appointment appointment) {
+        if (!isFollowUpAppointment(appointment)) {
+            return null;
+        }
+        String followUpNote = trimToNull(appointment.getFollowUpNote());
+        if (followUpNote != null) {
+            return followUpNote;
+        }
+        return trimToNull(appointment.getNotes());
+    }
+
+    private String resolveAppointmentNoteForDetail(Appointment appointment) {
+        if (appointment == null || isFollowUpAppointment(appointment)) {
+            return null;
+        }
+        return trimToNull(appointment.getNotes());
+    }
+
+    private String resolveAppointmentSymptomsForDetail(Appointment appointment) {
+        if (appointment == null) {
+            return null;
+        }
+        String symptoms = trimToNull(appointment.getSymptoms());
+        if (symptoms != null) {
+            return symptoms;
+        }
+        if (!isFollowUpAppointment(appointment)) {
+            return null;
+        }
+
+        Integer parentAppointmentId = resolveParentAppointmentId(appointment);
+        if (parentAppointmentId == null) {
+            return null;
+        }
+        return appointmentRepository.findById(parentAppointmentId)
+                .map(Appointment::getSymptoms)
+                .map(this::trimToNull)
+                .orElse(null);
+    }
+
+    private String resolveSeedSymptomsForFollowUp(Appointment sourceAppointment) {
+        if (sourceAppointment == null) {
+            return null;
+        }
+        return trimToNull(sourceAppointment.getSymptoms());
+    }
+
+    private FollowUpRequestPayload validateCreateFollowUpRequest(CreateFollowUpRequest request) {
+        Map<String, String> fieldErrors = new LinkedHashMap<>();
+        if (request == null) {
+            fieldErrors.put("followUpDate", "Vui long cung cap followUpDate theo dinh dang yyyy-MM-dd.");
+            fieldErrors.put("followUpTime", "Vui long cung cap followUpTime theo dinh dang HH:mm.");
+            throw buildFollowUpValidationException("Du lieu tai kham khong hop le.", fieldErrors);
+        }
+
+        LocalDate followUpDate = parseFollowUpDate(request.getFollowUpDate(), fieldErrors);
+        LocalTime followUpTime = parseFollowUpTime(request.getFollowUpTime(), fieldErrors);
+        if (!fieldErrors.isEmpty()) {
+            throw buildFollowUpValidationException("Du lieu tai kham khong hop le.", fieldErrors);
+        }
+
+        return new FollowUpRequestPayload(followUpDate, followUpTime, trimToNull(request.getNote()));
+    }
+
+    private LocalDate parseFollowUpDate(String rawValue, Map<String, String> fieldErrors) {
+        String value = trimToNull(rawValue);
+        if (value == null) {
+            fieldErrors.put("followUpDate", "Vui long cung cap followUpDate theo dinh dang yyyy-MM-dd.");
+            return null;
+        }
+        try {
+            return LocalDate.parse(value, FOLLOW_UP_DATE_FORMATTER);
+        } catch (DateTimeParseException ex) {
+            fieldErrors.put("followUpDate", "followUpDate phai theo dinh dang yyyy-MM-dd.");
+            return null;
+        }
+    }
+
+    private LocalTime parseFollowUpTime(String rawValue, Map<String, String> fieldErrors) {
+        String value = trimToNull(rawValue);
+        if (value == null) {
+            fieldErrors.put("followUpTime", "Vui long cung cap followUpTime theo dinh dang HH:mm.");
+            return null;
+        }
+        try {
+            return LocalTime.parse(value, FOLLOW_UP_TIME_FORMATTER);
+        } catch (DateTimeParseException ex) {
+            fieldErrors.put("followUpTime", "followUpTime phai theo dinh dang HH:mm.");
+            return null;
+        }
+    }
+
+    private SlotRule resolveFollowUpSlotRule(LocalDate date, LocalTime time) {
+        if (date == null || time == null) {
+            throw buildFollowUpValidationException(
+                    "Khung gio tai kham khong hop le.",
+                    Map.of("followUpTime", "Vui long cung cap followUpTime theo dinh dang HH:mm.")
+            );
+        }
+
+        LocalDateTime followUpDateTime = LocalDateTime.of(date, time).withSecond(0).withNano(0);
+        for (SlotRule slotRule : buildFollowUpSlotRules(date)) {
+            if (slotRule.start().equals(followUpDateTime)) {
+                return slotRule;
+            }
+        }
+
+        throw buildFollowUpValidationException(
+                "Khung gio tai kham khong hop le.",
+                Map.of(
+                        "followUpTime",
+                        "Gio hop le: 07:30, 08:00, 09:00, 10:00, 12:30, 13:00, 14:00, 15:00."
+                )
+        );
+    }
+
+    private List<SlotRule> buildFollowUpSlotRules(LocalDate date) {
+        return List.of(
+                new SlotRule(date, date.atTime(7, 30), date.atTime(8, 0), "MORNING", 3),
+                new SlotRule(date, date.atTime(8, 0), date.atTime(9, 0), "MORNING", 5),
+                new SlotRule(date, date.atTime(9, 0), date.atTime(10, 0), "MORNING", 5),
+                new SlotRule(date, date.atTime(10, 0), date.atTime(11, 0), "MORNING", 5),
+                new SlotRule(date, date.atTime(12, 30), date.atTime(13, 0), "AFTERNOON", 3),
+                new SlotRule(date, date.atTime(13, 0), date.atTime(14, 0), "AFTERNOON", 5),
+                new SlotRule(date, date.atTime(14, 0), date.atTime(15, 0), "AFTERNOON", 5),
+                new SlotRule(date, date.atTime(15, 0), date.atTime(16, 0), "AFTERNOON", 5)
+        );
+    }
+
+    private void validateDoctorScheduleForFollowUp(Integer doctorId, SlotRule slotRule) {
+        if (doctorId == null || slotRule == null) {
+            throw buildFollowUpValidationException("Khong xac dinh duoc bac si de tao lich tai kham.");
+        }
+
+        if (doctorScheduleRepository.countByDoctorId(doctorId) == 0) {
+            return;
+        }
+
+        List<DoctorSchedule> schedules = doctorScheduleRepository.findByDoctorIdAndWorkDate(doctorId, slotRule.date());
+        if (schedules.isEmpty()) {
+            throw buildFollowUpValidationException(
+                    "Bac si khong co lich lam viec vao ngay tai kham da chon.",
+                    Map.of("followUpDate", "Bac si khong co lich lam viec vao ngay nay.")
+            );
+        }
+
+        boolean matchesShift = schedules.stream()
+                .map(DoctorSchedule::getShift)
+                .map(this::normalizeScheduleShift)
+                .anyMatch(shift -> "ALL_DAY".equals(shift) || slotRule.shift().equals(shift));
+        if (!matchesShift) {
+            throw buildFollowUpValidationException(
+                    "Bac si khong co lich lam viec trong khung gio tai kham da chon.",
+                    Map.of("followUpTime", "Bac si khong co lich lam viec trong buoi cua gio nay.")
+            );
+        }
+    }
+
+    private void validateDoctorAvailabilityForFollowUp(Integer doctorId, SlotRule slotRule) {
+        if (doctorId == null || slotRule == null) {
+            throw buildFollowUpValidationException("Khong xac dinh duoc bac si de tao lich tai kham.");
+        }
+
+        long appointmentCount = appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end());
+        if (appointmentCount >= slotRule.maxPatients()) {
+            throw buildFollowUpValidationException(
+                    "Khung gio tai kham da full.",
+                    Map.of("followUpTime", "Khung gio nay da du so luong benh nhan toi da.")
+            );
+        }
+    }
+
+    private String normalizeScheduleShift(String shift) {
+        if (shift == null) {
+            return "";
+        }
+        return shift.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private BusinessException buildFollowUpValidationException(String message) {
+        return buildFollowUpValidationException(message, Map.of());
+    }
+
+    private BusinessException buildFollowUpValidationException(String message, Map<String, String> fieldErrors) {
+        return new BusinessException(
+                HttpStatus.BAD_REQUEST,
+                message,
+                FOLLOW_UP_VALIDATION_CODE,
+                fieldErrors
+        );
     }
 
     private String generateAppointmentCode() {
@@ -863,13 +1227,15 @@ public class DoctorPortalService {
                 dateTime == null ? null : dateTime.toLocalDate(),
                 dateTime == null ? null : dateTime.toLocalTime(),
                 formatTimeLabel(dateTime == null ? null : dateTime.toLocalTime()),
-                resolveDisplayType(appointment.getAppointmentType()),
+                resolveDisplayType(appointment),
+                resolveTypeCode(appointment),
                 displayStatus,
                 appointment.getConsultationFee(),
                 resolvePaymentStatusDisplay(appointment.getPaymentStatus()),
-                trimToNull(appointment.getFollowUpNote()),
-                appointment.getParentAppointment() == null ? null : appointment.getParentAppointment().getId(),
-                canExamine
+                resolveFollowUpNote(appointment),
+                resolveParentAppointmentId(appointment),
+                canExamine,
+                isFollowUpAppointment(appointment)
         );
     }
 
@@ -895,16 +1261,34 @@ public class DoctorPortalService {
                 followUpAppointment.getId(),
                 followUpAppointment.getAppointmentDate() == null ? null : followUpAppointment.getAppointmentDate().toLocalDate(),
                 followUpAppointment.getAppointmentDate() == null ? null : followUpAppointment.getAppointmentDate().toLocalTime(),
-                resolveDisplayType(followUpAppointment.getAppointmentType()),
+                resolveDisplayType(followUpAppointment),
                 resolveDisplayStatus(followUpAppointment.getStatus()),
                 followUpAppointment.getConsultationFee(),
                 resolvePaymentStatusDisplay(followUpAppointment.getPaymentStatus()),
-                trimToNull(followUpAppointment.getFollowUpNote()) == null
-                        ? followUpAppointment.getNotes()
-                        : followUpAppointment.getFollowUpNote(),
-                followUpAppointment.getParentAppointment() == null
-                        ? null
-                        : followUpAppointment.getParentAppointment().getId()
+                resolveFollowUpNote(followUpAppointment),
+                resolveParentAppointmentId(followUpAppointment)
+        );
+    }
+
+    private DoctorPatientMedicalRecordsResponse.FollowUpAppointmentInfo toDoctorFollowUpAppointmentInfo(Appointment followUpAppointment) {
+        if (followUpAppointment == null) {
+            return null;
+        }
+        String status = followUpAppointment.getStatus();
+        return new DoctorPatientMedicalRecordsResponse.FollowUpAppointmentInfo(
+                followUpAppointment.getId(),
+                followUpAppointment.getAppointmentCode(),
+                followUpAppointment.getAppointmentDate(),
+                resolveDisplayType(followUpAppointment),
+                resolveTypeCode(followUpAppointment),
+                normalizeStatusCode(status),
+                resolveDisplayStatus(status),
+                resolveStatusColor(status),
+                resolvePaymentStatusDisplay(followUpAppointment.getPaymentStatus()),
+                followUpAppointment.getConsultationFee(),
+                resolveFollowUpNote(followUpAppointment),
+                resolveParentAppointmentId(followUpAppointment),
+                isFollowUpAppointment(followUpAppointment)
         );
     }
 
@@ -946,7 +1330,7 @@ public class DoctorPortalService {
         if (filter == AppointmentTypeFilter.ALL) {
             return true;
         }
-        String normalizedType = foldText(resolveDisplayType(appointment.getAppointmentType()));
+        String normalizedType = foldText(resolveDisplayType(appointment));
         if (filter == AppointmentTypeFilter.NEW_EXAM) {
             return normalizedType != null && normalizedType.contains("khambenh");
         }
@@ -1022,12 +1406,42 @@ public class DoctorPortalService {
         };
     }
 
+    private String normalizeStatusCode(String storedStatus) {
+        AppointmentStatusFilter filter = resolveStatusFilterFromStoredValue(storedStatus);
+        return switch (filter) {
+            case COMPLETED -> STATUS_COMPLETED;
+            case CANCELLED -> STATUS_CANCELLED;
+            default -> STATUS_PENDING;
+        };
+    }
+
+    private String resolveStatusColor(String storedStatus) {
+        AppointmentStatusFilter filter = resolveStatusFilterFromStoredValue(storedStatus);
+        return switch (filter) {
+            case COMPLETED -> "green";
+            case CANCELLED -> "red";
+            default -> "yellow";
+        };
+    }
+
+    private String resolveDisplayType(Appointment appointment) {
+        return resolveDisplayType(
+                appointment == null ? null : appointment.getAppointmentType(),
+                appointment == null ? null : resolveParentAppointmentId(appointment),
+                appointment == null ? null : appointment.getFollowUpNote()
+        );
+    }
+
     private String resolveDisplayType(String storedType) {
+        return resolveDisplayType(storedType, null, null);
+    }
+
+    private String resolveDisplayType(String storedType, Integer parentAppointmentId, String followUpNote) {
         String normalized = foldText(storedType);
-        if (normalized == null) {
-            return "Kh\u00e1m b\u1ec7nh";
+        if (normalized != null && normalized.contains("taikham")) {
+            return "T\u00e1i kh\u00e1m";
         }
-        if (normalized.contains("taikham")) {
+        if (parentAppointmentId != null || trimToNull(followUpNote) != null) {
             return "T\u00e1i kh\u00e1m";
         }
         return "Kh\u00e1m b\u1ec7nh";
@@ -1197,6 +1611,18 @@ public class DoctorPortalService {
             case SATURDAY -> "Thá»© 7";
             case SUNDAY -> "Chá»§ Nháº­t";
         };
+    }
+
+    private record PatientVisitStats(long newExamCount, long followUpCount, LocalDate latestVisitDate) {
+        long totalVisitCount() {
+            return newExamCount + followUpCount;
+        }
+    }
+
+    private record FollowUpRequestPayload(LocalDate followUpDate, LocalTime followUpTime, String note) {
+    }
+
+    private record SlotRule(LocalDate date, LocalDateTime start, LocalDateTime end, String shift, int maxPatients) {
     }
 
     private enum AppointmentStatusFilter {

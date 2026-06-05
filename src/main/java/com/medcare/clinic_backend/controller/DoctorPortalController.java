@@ -109,7 +109,7 @@ public class DoctorPortalController {
     @PostMapping("/medical-records/{recordId}/follow-up")
     public CreateFollowUpResponse createFollowUp(
             @PathVariable Integer recordId,
-            @RequestBody CreateFollowUpRequest request,
+            @RequestBody(required = false) CreateFollowUpRequest request,
             Authentication authentication
     ) {
         return doctorPortalService.createFollowUp(getCurrentUsername(authentication), recordId, request);

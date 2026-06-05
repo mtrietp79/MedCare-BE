@@ -2,6 +2,7 @@ package com.medcare.clinic_backend.repository;
 
 import com.medcare.clinic_backend.entity.Appointment;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -49,6 +50,35 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
     long countByDoctorIdAndAppointmentDateBetween(Integer doctorId, LocalDateTime start, LocalDateTime end);
 
     long countByDoctorIdAndStatus(Integer doctorId, String status);
+
+    @Query("""
+            SELECT COUNT(a)
+            FROM Appointment a
+            WHERE a.doctor.id = :doctorId
+              AND a.appointmentDate >= :now
+              AND UPPER(COALESCE(a.status, '')) NOT IN ('CANCELLED', 'COMPLETED')
+            """)
+    long countUpcomingOpenAppointmentsByDoctorId(@Param("doctorId") Integer doctorId, @Param("now") LocalDateTime now);
+
+    @Query("""
+            SELECT COUNT(a)
+            FROM Appointment a
+            WHERE a.doctor.id = :doctorId
+              AND a.parentAppointment IS NOT NULL
+              AND a.appointmentDate >= :now
+              AND UPPER(COALESCE(a.status, '')) NOT IN ('CANCELLED', 'COMPLETED')
+            """)
+    long countUpcomingOpenFollowUpAppointmentsByDoctorId(@Param("doctorId") Integer doctorId, @Param("now") LocalDateTime now);
+
+    @Modifying
+    @Query("""
+            UPDATE Appointment a
+            SET a.parentAppointment = null
+            WHERE a.doctor.id = :doctorId
+            """)
+    void clearParentAppointmentByDoctorId(@Param("doctorId") Integer doctorId);
+
+    void deleteByDoctorId(Integer doctorId);
 
     List<Appointment> findTop5ByOrderByAppointmentDateDesc();
 

@@ -6,6 +6,9 @@ import com.medcare.clinic_backend.dto.MonthlyRevenueResponse;
 import com.medcare.clinic_backend.dto.RecentAppointmentResponse;
 import com.medcare.clinic_backend.service.DashboardService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -47,5 +50,22 @@ public class DashboardController {
     @GetMapping("/recent-appointments")
     public List<RecentAppointmentResponse> getRecentAppointments(Authentication authentication) {
         return dashboardService.getRecentAppointments();
+    }
+
+    @GetMapping({"/report", "/report.xlsx"})
+    public ResponseEntity<byte[]> exportDashboardReport(
+            @RequestParam(required = false) Integer year,
+            Authentication authentication
+    ) {
+        int targetYear = year == null ? java.time.LocalDate.now().getYear() : year;
+        byte[] fileContent = dashboardService.exportDashboardReport(year);
+        String filename = "medcare-dashboard-report-" + targetYear + ".xlsx";
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ))
+                .body(fileContent);
     }
 }

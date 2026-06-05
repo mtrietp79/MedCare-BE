@@ -86,5 +86,20 @@ public class CompleteAppointmentResponse {
         private String paymentStatus;
         private String note;
         private Integer parentAppointmentId;
+
+        @JsonProperty("appointmentType")
+        public String getAppointmentType() {
+            return type;
+        }
+
+        @JsonProperty("typeCode")
+        public String getTypeCode() {
+            return "T\u00e1i kh\u00e1m".equals(type) ? "FOLLOW_UP" : "NEW_EXAM";
+        }
+
+        @JsonProperty("appointmentTypeCode")
+        public String getAppointmentTypeCode() {
+            return getTypeCode();
+        }
     }
 }

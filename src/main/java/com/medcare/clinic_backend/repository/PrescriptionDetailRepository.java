@@ -17,6 +17,8 @@ public interface PrescriptionDetailRepository extends JpaRepository<Prescription
 
     List<PrescriptionDetail> findByMedicalRecordIdIn(List<Integer> recordIds);
 
+    void deleteByMedicalRecordIdIn(List<Integer> recordIds);
+
     @Query("""
             select m.id, m.name, m.unit, pd.quantity, pd.dosage, pd.note, m.price
             from PrescriptionDetail pd

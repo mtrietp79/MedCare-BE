@@ -22,16 +22,18 @@ public class AdminFinanceController {
     @GetMapping({"/api/admin/finance", "/api/admin/finance/invoices", "/api/admin/invoices"})
     public List<InvoiceResponse> getAdminInvoices(
             @RequestParam(value = "status", required = false) String status,
-            @RequestParam(value = "keyword", required = false) String keyword
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "category", required = false) String category
     ) {
-        return financeService.getInvoiceResponsesForAdmin(keyword, status);
+        return financeService.getInvoiceResponsesForAdmin(keyword, status, category);
     }
 
     @GetMapping({"/api/admin/finance/summary", "/api/admin/invoices/summary"})
     public FinanceSummaryResponse getAdminFinanceSummary(
             @RequestParam(value = "status", required = false) String status,
-            @RequestParam(value = "keyword", required = false) String keyword
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "category", required = false) String category
     ) {
-        return financeService.buildSummary(financeService.getInvoiceResponsesForAdmin(keyword, status));
+        return financeService.buildSummary(financeService.getInvoiceResponsesForAdmin(keyword, status, category));
     }
 }

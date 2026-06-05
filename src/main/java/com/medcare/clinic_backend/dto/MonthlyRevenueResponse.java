@@ -10,4 +10,16 @@ import lombok.NoArgsConstructor;
 public class MonthlyRevenueResponse {
     private String month;
     private Double revenue;
+
+    public Double getTotal() {
+        return revenue;
+    }
+
+    public Double getValue() {
+        return revenue;
+    }
+
+    public String getLabel() {
+        return month;
+    }
 }

@@ -220,7 +220,7 @@ public class ServicePackageService {
 
         String ipAddress = httpServletRequest == null ? "127.0.0.1" : VNPayConfig.getIpAddress(httpServletRequest);
         paymentService.createPendingTransactionForServicePackage(saved.getId(), saved.getTotalAmount());
-        String paymentUrl = paymentService.createServicePackagePaymentUrl(saved.getId(), ipAddress);
+        String paymentUrl = paymentService.createServicePackagePaymentUrl(saved.getId(), ipAddress, username);
 
         return new ServicePackageBookingResponse(
                 saved.getId(),
@@ -449,6 +449,10 @@ public class ServicePackageService {
         TransactionLog latestPaidLog = transactionLogRepository
                 .findTopByServicePackageBookingIdAndResponseCodeOrderByCreatedAtDesc(booking.getId(), "00");
         String invoiceCode = latestPaidLog == null ? null : latestPaidLog.getVnpTransactionNo();
+        boolean canPayOnline = !"PAID".equals(normalizePaymentStatus(booking.getPaymentStatus()))
+                && !"CANCELLED".equals(normalizePaymentStatus(booking.getPaymentStatus()))
+                && booking.getTotalAmount() != null
+                && booking.getTotalAmount() > 0;
 
         return new ServicePackageBookingDetailResponse(
                 booking.getId(),
@@ -459,9 +463,13 @@ public class ServicePackageService {
                 booking.getBookingTime(),
                 booking.getNote(),
                 booking.getTotalAmount(),
+                "SERVICE_PACKAGE",
+                "H\u00f3a \u0111\u01a1n g\u00f3i d\u1ecbch v\u1ee5",
                 normalizePaymentStatus(booking.getPaymentStatus()),
                 normalizeBookingStatus(booking.getStatus()),
                 invoiceCode,
+                canPayOnline,
+                latestPaidLog == null ? null : latestPaidLog.getCreatedAt(),
                 booking.getCreatedAt(),
                 booking.getUpdatedAt()
         );

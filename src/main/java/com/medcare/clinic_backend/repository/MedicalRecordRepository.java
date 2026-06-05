@@ -22,6 +22,10 @@ public interface MedicalRecordRepository extends JpaRepository<MedicalRecord, In
 
     List<MedicalRecord> findByPatientIdAndDoctorIdOrderByExaminationDateDesc(Integer patientId, Integer doctorId);
 
+    long countByDoctorId(Integer doctorId);
+
+    void deleteByDoctorId(Integer doctorId);
+
     boolean existsByAppointmentId(Integer appointmentId);
 
     Optional<MedicalRecord> findByAppointmentIdAndPatientId(Integer appointmentId, Integer patientId);

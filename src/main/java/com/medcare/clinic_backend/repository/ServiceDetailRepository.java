@@ -14,6 +14,8 @@ public interface ServiceDetailRepository extends JpaRepository<ServiceDetail, In
 
     List<ServiceDetail> findByMedicalRecordIdIn(List<Integer> recordIds);
 
+    void deleteByMedicalRecordIdIn(List<Integer> recordIds);
+
     @Query("""
             select ms.id, ms.name, sd.quantity, sd.result, ms.price
             from ServiceDetail sd

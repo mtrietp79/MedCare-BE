@@ -24,6 +24,8 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Integer> {
 
     Optional<Invoice> findByMedicalRecordIdAndMedicalRecordPatientId(Integer recordId, Integer patientId);
 
+    void deleteByMedicalRecordIdIn(List<Integer> recordIds);
+
     @Query("""
             select i.medicalRecord.id, i.id, i.status, i.totalAmount
             from Invoice i

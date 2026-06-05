@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.exception;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -12,24 +13,27 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final String FOLLOW_UP_VALIDATION_CODE = "FOLLOW_UP_VALIDATION_ERROR";
 
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<Map<String, String>> handleBusinessException(BusinessException ex) {
+    public ResponseEntity<Map<String, Object>> handleBusinessException(BusinessException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("message", ex.getMessage());
         if (ex.getCode() != null && !ex.getCode().isBlank()) {
-            return ResponseEntity.status(ex.getStatus())
-                    .body(Map.of(
-                            "message", ex.getMessage(),
-                            "code", ex.getCode()
-                    ));
+            body.put("code", ex.getCode());
+        }
+        if (FOLLOW_UP_VALIDATION_CODE.equals(ex.getCode()) || !ex.getFieldErrors().isEmpty()) {
+            body.put("fieldErrors", ex.getFieldErrors());
         }
         return ResponseEntity.status(ex.getStatus())
-                .body(Map.of("message", ex.getMessage()));
+                .body(body);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
@@ -40,17 +44,37 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<Map<String, String>> handleHttpMessageNotReadableException(HttpMessageNotReadableException ex) {
+    public ResponseEntity<Map<String, Object>> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException ex,
+            HttpServletRequest request
+    ) {
         logger.error("Malformed request payload", ex);
+        if (isFollowUpEndpoint(request)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(buildFollowUpValidationBody(
+                            "Du lieu gui len khong dung dinh dang JSON hoac sai kieu du lieu.",
+                            Map.of()
+                    ));
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("message", "Du lieu gui len khong dung dinh dang JSON hoac sai ten truong."));
+                .body(Map.<String, Object>of("message", "Du lieu gui len khong dung dinh dang JSON hoac sai ten truong."));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<Map<String, String>> handleMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException ex) {
+    public ResponseEntity<Map<String, Object>> handleMethodArgumentTypeMismatchException(
+            MethodArgumentTypeMismatchException ex,
+            HttpServletRequest request
+    ) {
         String parameterName = ex.getName() == null ? "tham so" : ex.getName();
+        if (isFollowUpEndpoint(request)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(buildFollowUpValidationBody(
+                            "Gia tri cua '" + parameterName + "' khong hop le.",
+                            Map.of()
+                    ));
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("message", "Gia tri cua '" + parameterName + "' khong hop le."));
+                .body(Map.<String, Object>of("message", "Gia tri cua '" + parameterName + "' khong hop le."));
     }
 
     @ExceptionHandler(AuthenticationException.class)
@@ -70,5 +94,23 @@ public class GlobalExceptionHandler {
         logger.error("Unhandled runtime exception", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("message", "Da xay ra loi he thong. Vui long thu lai sau."));
+    }
+
+    private boolean isFollowUpEndpoint(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        String uri = request.getRequestURI();
+        return uri != null
+                && uri.contains("/api/doctor/medical-records/")
+                && uri.endsWith("/follow-up");
+    }
+
+    private Map<String, Object> buildFollowUpValidationBody(String message, Map<String, String> fieldErrors) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("message", message);
+        body.put("code", FOLLOW_UP_VALIDATION_CODE);
+        body.put("fieldErrors", fieldErrors == null ? Map.of() : fieldErrors);
+        return body;
     }
 }

@@ -6,12 +6,14 @@ import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.Invoice;
 import com.medcare.clinic_backend.entity.MedicalRecord;
+import com.medcare.clinic_backend.entity.TransactionLog;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
 import com.medcare.clinic_backend.repository.InvoiceRepository;
 import com.medcare.clinic_backend.repository.MedicalRecordRepository;
 import com.medcare.clinic_backend.repository.PrescriptionDetailRepository;
 import com.medcare.clinic_backend.repository.ServiceDetailRepository;
+import com.medcare.clinic_backend.repository.TransactionLogRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -47,6 +49,9 @@ public class MedicalRecordService {
 
     @Autowired
     private ServiceDetailRepository serviceDetailRepository;
+
+    @Autowired
+    private TransactionLogRepository transactionLogRepository;
 
     public List<MedicalRecord> getAllRecords() {
         return medicalRecordRepository.findAll();
@@ -365,6 +370,16 @@ public class MedicalRecordService {
     private PatientMedicalRecordDetailResponse.InvoiceInfo toInvoiceInfo(Invoice invoice) {
         Integer invoiceId = invoice == null ? null : invoice.getId();
         String status = normalizeInvoiceStatus(invoice == null ? null : invoice.getStatus());
+        String invoiceCategory = isFollowUpType(invoice != null
+                && invoice.getAppointment() != null
+                ? invoice.getAppointment().getAppointmentType()
+                : (invoice != null
+                && invoice.getMedicalRecord() != null
+                && invoice.getMedicalRecord().getAppointment() != null
+                ? invoice.getMedicalRecord().getAppointment().getAppointmentType()
+                : null))
+                ? "FOLLOW_UP"
+                : "POST_EXAM";
         double consultationFee = safeDouble(invoice == null ? null : invoice.getConsultationFee());
         double medicineFee = safeDouble(invoice == null ? null : invoice.getMedicineFee());
         double serviceFee = safeDouble(invoice == null ? null : invoice.getServiceFee());
@@ -377,13 +392,16 @@ public class MedicalRecordService {
         return new PatientMedicalRecordDetailResponse.InvoiceInfo(
                 invoiceId,
                 invoiceId == null ? null : "INV" + String.format("%06d", invoiceId),
+                invoiceCategory,
+                "FOLLOW_UP".equals(invoiceCategory) ? "H\u00f3a \u0111\u01a1n t\u00e1i kh\u00e1m" : "H\u00f3a \u0111\u01a1n sau kh\u00e1m",
                 status,
                 consultationFee,
                 medicineFee,
                 serviceFee,
                 totalAmount,
                 canPayOnline,
-                invoice == null ? null : invoice.getCreatedAt()
+                invoice == null ? null : invoice.getCreatedAt(),
+                resolveInvoicePaymentDate(invoiceId)
         );
     }
 
@@ -446,6 +464,20 @@ public class MedicalRecordService {
             return "T\u00e1i kh\u00e1m";
         }
         return "Kh\u00e1m b\u1ec7nh";
+    }
+
+    private boolean isFollowUpType(String type) {
+        String normalized = trimToNull(type);
+        if (normalized == null) {
+            return false;
+        }
+        String folded = Normalizer.normalize(normalized, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('\u0111', 'd')
+                .replace('\u0110', 'D')
+                .toLowerCase(Locale.ROOT)
+                .replace(" ", "");
+        return folded.contains("taikham");
     }
 
     private String normalizeStatus(String status) {
@@ -615,5 +647,19 @@ public class MedicalRecordService {
         } catch (RuntimeException ex) {
             return null;
         }
+    }
+
+    private LocalDateTime resolveInvoicePaymentDate(Integer invoiceId) {
+        if (invoiceId == null) {
+            return null;
+        }
+        TransactionLog successLog =
+                transactionLogRepository.findTopByInvoiceIdAndResponseCodeOrderByCreatedAtDesc(invoiceId, "00");
+        if (successLog != null) {
+            return successLog.getCreatedAt();
+        }
+        TransactionLog manualLog =
+                transactionLogRepository.findTopByInvoiceIdAndResponseCodeOrderByCreatedAtDesc(invoiceId, "MANUAL_PAID");
+        return manualLog == null ? null : manualLog.getCreatedAt();
     }
 }

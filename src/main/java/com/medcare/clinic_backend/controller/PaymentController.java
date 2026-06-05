@@ -2,7 +2,9 @@ package com.medcare.clinic_backend.controller;
 
 import com.medcare.clinic_backend.config.VNPayConfig;
 import com.medcare.clinic_backend.dto.payment.AppointmentPaymentReceiptResponse;
+import com.medcare.clinic_backend.dto.payment.InvoicePaymentReceiptResponse;
 import com.medcare.clinic_backend.dto.payment.PaymentReturnResult;
+import com.medcare.clinic_backend.dto.payment.ServicePackagePaymentReceiptResponse;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.service.PaymentService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -55,6 +57,21 @@ public class PaymentController {
         );
     }
 
+    @GetMapping("/create-service-package-url")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public String createServicePackagePaymentUrl(@RequestParam("bookingId") Integer bookingId,
+                                                 Authentication authentication,
+                                                 HttpServletRequest request) {
+        if (bookingId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu bookingId.");
+        }
+        return paymentService.createServicePackagePaymentUrl(
+                bookingId,
+                VNPayConfig.getIpAddress(request),
+                authentication == null ? null : authentication.getName()
+        );
+    }
+
     @GetMapping("/vnpay-return")
     public ResponseEntity<?> paymentReturn(
             @RequestParam Map<String, String> queryParams,
@@ -63,7 +80,28 @@ public class PaymentController {
             @RequestParam(value = "invoiceId", required = false) Integer invoiceId
     ) {
         if (bookingId != null) {
-            PaymentReturnResult result = paymentService.processServicePackageBookingVnpayReturn(queryParams, bookingId);
+            PaymentReturnResult result;
+            try {
+                result = paymentService.processServicePackageBookingVnpayReturn(queryParams, bookingId);
+            } catch (BusinessException ex) {
+                String frontendUrl = paymentService.buildServicePackageFrontendReturnUrl(
+                        bookingId,
+                        new PaymentReturnResult(false, ex.getMessage(), "ERROR")
+                );
+                if (frontendUrl != null && !frontendUrl.isBlank()) {
+                    return ResponseEntity.status(HttpStatus.FOUND)
+                            .header(HttpHeaders.LOCATION, frontendUrl)
+                            .build();
+                }
+                throw ex;
+            }
+
+            String frontendUrl = paymentService.buildServicePackageFrontendReturnUrl(bookingId, result);
+            if (frontendUrl != null && !frontendUrl.isBlank()) {
+                return ResponseEntity.status(HttpStatus.FOUND)
+                        .header(HttpHeaders.LOCATION, frontendUrl)
+                        .build();
+            }
             return ResponseEntity.ok(result.message());
         }
         if (appointmentId != null) {
@@ -92,7 +130,28 @@ public class PaymentController {
             return ResponseEntity.ok(result.message());
         }
         if (invoiceId != null) {
-            PaymentReturnResult result = paymentService.processInvoiceVnpayReturn(queryParams, invoiceId);
+            PaymentReturnResult result;
+            try {
+                result = paymentService.processInvoiceVnpayReturn(queryParams, invoiceId);
+            } catch (BusinessException ex) {
+                String frontendUrl = paymentService.buildInvoiceFrontendReturnUrl(
+                        invoiceId,
+                        new PaymentReturnResult(false, ex.getMessage(), "ERROR")
+                );
+                if (frontendUrl != null && !frontendUrl.isBlank()) {
+                    return ResponseEntity.status(HttpStatus.FOUND)
+                            .header(HttpHeaders.LOCATION, frontendUrl)
+                            .build();
+                }
+                throw ex;
+            }
+
+            String frontendUrl = paymentService.buildInvoiceFrontendReturnUrl(invoiceId, result);
+            if (frontendUrl != null && !frontendUrl.isBlank()) {
+                return ResponseEntity.status(HttpStatus.FOUND)
+                        .header(HttpHeaders.LOCATION, frontendUrl)
+                        .build();
+            }
             return ResponseEntity.ok(result.message());
         }
         throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu appointmentId, bookingId hoac invoiceId.");
@@ -109,6 +168,36 @@ public class PaymentController {
         }
         return paymentService.getAppointmentPaymentReceipt(
                 appointmentId,
+                authentication == null ? null : authentication.getName()
+        );
+    }
+
+    @GetMapping("/service-package-receipt")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public ServicePackagePaymentReceiptResponse getServicePackageReceipt(
+            @RequestParam("bookingId") Integer bookingId,
+            Authentication authentication
+    ) {
+        if (bookingId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu bookingId.");
+        }
+        return paymentService.getServicePackagePaymentReceipt(
+                bookingId,
+                authentication == null ? null : authentication.getName()
+        );
+    }
+
+    @GetMapping("/invoice-receipt")
+    @PreAuthorize("hasAuthority('ROLE_PATIENT')")
+    public InvoicePaymentReceiptResponse getInvoiceReceipt(
+            @RequestParam("invoiceId") Integer invoiceId,
+            Authentication authentication
+    ) {
+        if (invoiceId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu invoiceId.");
+        }
+        return paymentService.getInvoicePaymentReceipt(
+                invoiceId,
                 authentication == null ? null : authentication.getName()
         );
     }

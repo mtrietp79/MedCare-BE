@@ -952,14 +952,40 @@ FE page suggestions:
 ### `GET /api/dashboard/summary`
 
 - Role: `ROLE_ADMIN`
+- Alias: `GET /api/admin/dashboard/summary`
 
 ### `GET /api/dashboard/recent-appointments`
 
 - Role: `ROLE_ADMIN`
+- Alias: `GET /api/admin/dashboard/recent-appointments`
+
+### `GET /api/dashboard/monthly-patients`
+
+- Role: `ROLE_ADMIN`
+- Alias: `GET /api/admin/dashboard/monthly-patients`
+- Query optional:
+  - `year`: nam thong ke, mac dinh nam hien tai
 
 ### `GET /api/dashboard/revenue-chart`
 
 - Role: `ROLE_ADMIN`
+- Alias: `GET /api/admin/dashboard/revenue-chart`
+- Query optional:
+  - `year`: nam thong ke, mac dinh nam hien tai
+
+### `GET /api/dashboard/report`
+
+- Role: `ROLE_ADMIN`
+- Alias:
+  - `GET /api/admin/dashboard/report`
+  - `GET /api/dashboard/report.xlsx`
+  - `GET /api/admin/dashboard/report.xlsx`
+- Query optional:
+  - `year`: nam bao cao, mac dinh nam hien tai
+- Response:
+  - file Excel `.xlsx`
+  - content-type: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+  - content-disposition attachment voi filename dang `medcare-dashboard-report-<year>.xlsx`
 
 ---
 

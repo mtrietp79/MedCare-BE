@@ -16,4 +16,28 @@ public class RecentAppointmentResponse {
     private String status;
     private String statusCode;
     private String appointmentDateTime;
+
+    public String getPatient() {
+        return patientName;
+    }
+
+    public String getDoctor() {
+        return doctorName;
+    }
+
+    public String getSpecialty() {
+        return specialtyName;
+    }
+
+    public String getAppointmentDate() {
+        return date;
+    }
+
+    public String getAppointmentTime() {
+        return time;
+    }
+
+    public String getStatusDisplay() {
+        return status;
+    }
 }

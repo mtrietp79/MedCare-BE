@@ -1,0 +1,87 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ---------------------< com.medcare:clinic-backend >---------------------
+[INFO] Building  0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] >>> spring-boot:4.0.5:run (default-cli) > test-compile @ clinic-backend >>>
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ clinic-backend ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ clinic-backend ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ clinic-backend ---
+[INFO] skip non existing resourceDirectory C:\Users\TRIET(JAHAN)\Downloads\clinic-backend\clinic-backend\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ clinic-backend ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] <<< spring-boot:4.0.5:run (default-cli) < test-compile @ clinic-backend <<<
+[INFO] 
+[INFO] 
+[INFO] --- spring-boot:4.0.5:run (default-cli) @ clinic-backend ---
+[INFO] Attaching agents: []
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.5)
+
+2026-05-29T00:23:54.357+07:00  INFO 11912 --- [clinic-backend] [           main] c.m.c.ClinicBackendApplication           : Starting ClinicBackendApplication using Java 21.0.10 with PID 11912 (C:\Users\TRIET(JAHAN)\Downloads\clinic-backend\clinic-backend\target\classes started by TRIET(JAHAN) in C:\Users\TRIET(JAHAN)\Downloads\clinic-backend\clinic-backend)
+2026-05-29T00:23:54.377+07:00  INFO 11912 --- [clinic-backend] [           main] c.m.c.ClinicBackendApplication           : No active profile set, falling back to 1 default profile: "default"
+2026-05-29T00:23:56.080+07:00  INFO 11912 --- [clinic-backend] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-05-29T00:23:56.289+07:00  INFO 11912 --- [clinic-backend] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 193 ms. Found 21 JPA repository interfaces.
+2026-05-29T00:23:57.240+07:00  INFO 11912 --- [clinic-backend] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat initialized with port 8081 (http)
+2026-05-29T00:23:57.278+07:00  INFO 11912 --- [clinic-backend] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-05-29T00:23:57.280+07:00  INFO 11912 --- [clinic-backend] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.20]
+2026-05-29T00:23:57.384+07:00  INFO 11912 --- [clinic-backend] [           main] b.w.c.s.WebApplicationContextInitializer : Root WebApplicationContext: initialization completed in 2925 ms
+2026-05-29T00:23:57.665+07:00  INFO 11912 --- [clinic-backend] [           main] org.hibernate.orm.jpa                    : HHH008540: Processing PersistenceUnitInfo [name: default]
+2026-05-29T00:23:57.761+07:00  INFO 11912 --- [clinic-backend] [           main] org.hibernate.orm.core                   : HHH000001: Hibernate ORM core version 7.2.7.Final
+2026-05-29T00:23:58.510+07:00  INFO 11912 --- [clinic-backend] [           main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-05-29T00:23:58.564+07:00  INFO 11912 --- [clinic-backend] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-05-29T00:23:58.869+07:00  INFO 11912 --- [clinic-backend] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@c6c84fa
+2026-05-29T00:23:58.872+07:00  INFO 11912 --- [clinic-backend] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-05-29T00:23:58.982+07:00  INFO 11912 --- [clinic-backend] [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [jdbc:postgresql://localhost:5432/clinic_booking_db]
+	Database driver: PostgreSQL JDBC Driver
+	Database dialect: PostgreSQLDialect
+	Database version: 18.3
+	Default catalog/schema: clinic_booking_db/public
+	Autocommit mode: undefined/unknown
+	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+	JDBC fetch size: none
+	Pool: DataSourceConnectionProvider
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-05-29T00:24:01.103+07:00  INFO 11912 --- [clinic-backend] [           main] org.hibernate.orm.core                   : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-05-29T00:24:01.293+07:00  INFO 11912 --- [clinic-backend] [           main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-05-29T00:24:01.420+07:00  INFO 11912 --- [clinic-backend] [           main] o.s.d.j.r.query.QueryEnhancerFactories   : Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-05-29T00:24:04.752+07:00  INFO 11912 --- [clinic-backend] [           main] r$InitializeUserDetailsManagerConfigurer : Global AuthenticationManager configured with UserDetailsService bean with name customUserDetailsService
+2026-05-29T00:24:06.692+07:00  INFO 11912 --- [clinic-backend] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat started on port 8081 (http) with context path '/'
+2026-05-29T00:24:06.718+07:00  INFO 11912 --- [clinic-backend] [           main] c.m.c.ClinicBackendApplication           : Started ClinicBackendApplication in 13.113 seconds (process running for 13.781)
+2026-05-29T00:24:07.004+07:00  INFO 11912 --- [clinic-backend] [nio-8081-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-29T00:24:07.014+07:00  INFO 11912 --- [clinic-backend] [nio-8081-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-05-29T00:24:07.017+07:00  INFO 11912 --- [clinic-backend] [nio-8081-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 2 ms
+2026-05-29T00:24:07.040+07:00  WARN 11912 --- [clinic-backend] [           main] o.s.core.events.SpringDocAppInitializer  : SpringDoc /v3/api-docs endpoint is enabled by default. To disable it in production, set the property 'springdoc.api-docs.enabled=false'
+2026-05-29T00:24:07.041+07:00  WARN 11912 --- [clinic-backend] [           main] o.s.core.events.SpringDocAppInitializer  : SpringDoc /swagger-ui.html endpoint is enabled by default. To disable it in production, set the property 'springdoc.swagger-ui.enabled=false'
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  01:03 min
+[INFO] Finished at: 2026-05-29T00:24:51+07:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.springframework.boot:spring-boot-maven-plugin:4.0.5:run (default-cli) on project clinic-backend: Process terminated with exit code: -1 -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoExecutionException

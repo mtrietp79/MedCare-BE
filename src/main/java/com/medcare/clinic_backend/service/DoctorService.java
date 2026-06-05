@@ -1,17 +1,28 @@
 package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.entity.Account;
+import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.DoctorPhoto;
+import com.medcare.clinic_backend.entity.MedicalRecord;
 import com.medcare.clinic_backend.entity.Specialty;
 import com.medcare.clinic_backend.dto.DoctorResponse;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AccountRepository;
+import com.medcare.clinic_backend.repository.AppointmentRepository;
 import com.medcare.clinic_backend.repository.DoctorPhotoRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
+import com.medcare.clinic_backend.repository.DoctorScheduleRepository;
+import com.medcare.clinic_backend.repository.FeedbackRepository;
+import com.medcare.clinic_backend.repository.InvoiceRepository;
+import com.medcare.clinic_backend.repository.MedicalRecordRepository;
+import com.medcare.clinic_backend.repository.MedicalServiceRepository;
+import com.medcare.clinic_backend.repository.PrescriptionDetailRepository;
+import com.medcare.clinic_backend.repository.ServiceDetailRepository;
 import com.medcare.clinic_backend.repository.SpecialtyRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -42,6 +53,26 @@ public class DoctorService {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private AppointmentRepository appointmentRepository;
+
+    @Autowired
+    private DoctorScheduleRepository doctorScheduleRepository;
+
+    @Autowired
+    private FeedbackRepository feedbackRepository;
+
+    @Autowired
+    private MedicalRecordRepository medicalRecordRepository;
+
+    @Autowired
+    private InvoiceRepository invoiceRepository;
+    @Autowired
+    private PrescriptionDetailRepository prescriptionDetailRepository;
+    @Autowired
+    private ServiceDetailRepository serviceDetailRepository;
+    @Autowired
+    private MedicalServiceRepository medicalServiceRepository;
     @Value("${app.doctor-photo.max-size-bytes:2097152}")
     private long maxDoctorPhotoSizeBytes;
 
@@ -263,13 +294,54 @@ public class DoctorService {
         return doctorRepository.save(doctor);
     }
 
+    @Transactional
     public void deleteDoctor(Integer id) {
-        if (!doctorRepository.existsById(id)) {
-            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + id);
+        Doctor doctor = doctorRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay bac si ID: " + id));
+        LocalDateTime now = LocalDateTime.now();
+        long activeAppointmentCount = appointmentRepository.countUpcomingOpenAppointmentsByDoctorId(id, now);
+        long activeFollowUpCount = appointmentRepository.countUpcomingOpenFollowUpAppointmentsByDoctorId(id, now);
+        if (activeAppointmentCount > 0) {
+            throw buildDoctorDeleteActiveAppointmentException(activeAppointmentCount, activeFollowUpCount);
         }
-        doctorRepository.deleteById(id);
+        Account linkedAccount = doctor.getAccount();
+        try {
+            medicalServiceRepository.clearAssignedDoctorByDoctorId(id);
+            doctorPhotoRepository.deleteByDoctorId(id);
+            doctorScheduleRepository.deleteByDoctorId(id);
+            List<Integer> recordIds = medicalRecordRepository.findByDoctorIdOrderByExaminationDateDesc(id).stream()
+                    .map(MedicalRecord::getId)
+                    .filter(recordId -> recordId != null)
+                    .toList();
+            if (!recordIds.isEmpty()) {
+                invoiceRepository.deleteByMedicalRecordIdIn(recordIds);
+                prescriptionDetailRepository.deleteByMedicalRecordIdIn(recordIds);
+                serviceDetailRepository.deleteByMedicalRecordIdIn(recordIds);
+                medicalRecordRepository.deleteByDoctorId(id);
+            }
+            feedbackRepository.deleteByDoctorId(id);
+            List<Integer> appointmentIds = appointmentRepository.findByDoctorIdOrderByAppointmentDateDesc(id).stream()
+                    .map(Appointment::getId)
+                    .filter(appointmentId -> appointmentId != null)
+                    .toList();
+            if (!appointmentIds.isEmpty()) {
+                appointmentRepository.clearParentAppointmentByDoctorId(id);
+                appointmentRepository.deleteByDoctorId(id);
+            }
+            doctorRepository.delete(doctor);
+            doctorRepository.flush();
+            if (shouldDeleteLinkedDoctorAccount(linkedAccount)) {
+                accountRepository.delete(linkedAccount);
+                accountRepository.flush();
+            }
+        } catch (DataIntegrityViolationException ex) {
+            throw new BusinessException(
+                    HttpStatus.CONFLICT,
+                    "Khong the xoa bac si nay vi van con du lieu lien quan.",
+                    "DOCTOR_DELETE_BLOCKED"
+            );
+        }
     }
-
     @Transactional
     public Doctor updateDoctorActiveStatus(Integer id, Boolean active) {
         if (active == null) {
@@ -564,6 +636,35 @@ public class DoctorService {
         response.setImageUrl(photoUrl);
     }
 
+    private BusinessException buildDoctorDeleteActiveAppointmentException(
+            long activeAppointmentCount,
+            long activeFollowUpCount
+    ) {
+        long activeRegularAppointmentCount = Math.max(0L, activeAppointmentCount - activeFollowUpCount);
+        String message;
+        if (activeRegularAppointmentCount > 0 && activeFollowUpCount > 0) {
+            message = "Khong the xoa bac si vi dang co lich hen va lich tai kham. Vui long cho den khi het lich.";
+        } else if (activeFollowUpCount > 0) {
+            message = "Khong the xoa bac si vi dang co lich tai kham. Vui long cho den khi het lich.";
+        } else {
+            message = "Khong the xoa bac si vi dang co lich hen. Vui long cho den khi het lich.";
+        }
+        return new BusinessException(HttpStatus.CONFLICT, message, "DOCTOR_DELETE_HAS_ACTIVE_APPOINTMENTS");
+    }
+    private boolean shouldDeleteLinkedDoctorAccount(Account account) {
+        if (account == null) {
+            return false;
+        }
+        String normalizedRole = normalizeText(account.getRole());
+        if (normalizedRole == null) {
+            return false;
+        }
+        if (!normalizedRole.startsWith("ROLE_")) {
+            normalizedRole = "ROLE_" + normalizedRole;
+        }
+        return "ROLE_DOCTOR".equalsIgnoreCase(normalizedRole);
+    }
+
     private String normalizeText(String value) {
         if (value == null) {
             return null;
@@ -576,3 +677,4 @@ public class DoctorService {
         return value == null ? "" : value;
     }
 }
+

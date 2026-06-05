@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.dto.doctor;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -11,15 +12,26 @@ import java.time.LocalTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreateFollowUpResponse {
-    private Integer appointmentId;
-    private Integer patientId;
-    private Integer doctorId;
+    private Integer id;
     private LocalDate appointmentDate;
     private LocalTime appointmentTime;
     private String type;
     private String status;
-    private Double consultationFee;
     private String paymentStatus;
-    private String note;
-    private Integer parentAppointmentId;
+    private Double consultationFee;
+
+    @JsonProperty("appointmentType")
+    public String getAppointmentType() {
+        return type;
+    }
+
+    @JsonProperty("typeCode")
+    public String getTypeCode() {
+        return "T\u00e1i kh\u00e1m".equals(type) ? "FOLLOW_UP" : "NEW_EXAM";
+    }
+
+    @JsonProperty("appointmentTypeCode")
+    public String getAppointmentTypeCode() {
+        return getTypeCode();
+    }
 }

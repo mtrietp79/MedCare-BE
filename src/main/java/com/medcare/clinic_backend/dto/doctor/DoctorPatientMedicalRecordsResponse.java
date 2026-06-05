@@ -39,15 +39,32 @@ public class DoctorPatientMedicalRecordsResponse {
         private LocalDateTime recordCreatedAt;
         private LocalDate examDate;
         private String type;
+        private String typeCode;
         private String symptoms;
         private String diagnosis;
         private String doctorAdvice;
         private List<MedicineItem> medicines;
         private List<ServiceItem> services;
+        private FollowUpAppointmentInfo followUpAppointment;
 
         @JsonProperty("createdAt")
         public LocalDateTime getCreatedAt() {
             return recordCreatedAt;
+        }
+
+        @JsonProperty("appointmentType")
+        public String getAppointmentType() {
+            return type;
+        }
+
+        @JsonProperty("appointmentTypeCode")
+        public String getAppointmentTypeCode() {
+            return typeCode;
+        }
+
+        @JsonProperty("followUpAppointmentId")
+        public Integer getFollowUpAppointmentId() {
+            return followUpAppointment == null ? null : followUpAppointment.getAppointmentId();
         }
     }
 
@@ -68,5 +85,34 @@ public class DoctorPatientMedicalRecordsResponse {
     public static class ServiceItem {
         private String name;
         private Double price;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class FollowUpAppointmentInfo {
+        private Integer appointmentId;
+        private String appointmentCode;
+        private LocalDateTime appointmentDateTime;
+        private String type;
+        private String typeCode;
+        private String status;
+        private String statusDisplay;
+        private String statusColor;
+        private String paymentStatus;
+        private Double consultationFee;
+        private String note;
+        private Integer parentAppointmentId;
+        private boolean followUp;
+
+        @JsonProperty("appointmentType")
+        public String getAppointmentType() {
+            return type;
+        }
+
+        @JsonProperty("appointmentTypeCode")
+        public String getAppointmentTypeCode() {
+            return typeCode;
+        }
     }
 }
