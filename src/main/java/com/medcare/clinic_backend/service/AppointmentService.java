@@ -109,7 +109,7 @@ public class AppointmentService {
         patientService.ensureProfileCompleted(patientId);
         applyRequestedMedicalService(app);
 
-        SlotRule slotRule = resolveSlotRule(app.getAppointmentDate());
+        AppointmentSlotService.SlotRule slotRule = resolveSlotRule(app.getAppointmentDate());
         app.setAppointmentDate(slotRule.start());
         app.setStatus("PENDING_PAYMENT");
         if (isFollowUpType(app.getAppointmentType())) {
@@ -160,7 +160,7 @@ public class AppointmentService {
         Doctor doctor = fetchDoctor(doctorId);
         ensureDoctorActiveForBooking(doctor);
 
-        return appointmentSlotService.getDoctorSlots(doctorId, date);
+        return appointmentSlotService.getDoctorSlotsForPatientBooking(doctorId, date);
     }
 
     public List<SlotAvailabilityDto> getMedicalServiceSlotStatus(Integer serviceId, LocalDate date) {
@@ -188,11 +188,11 @@ public class AppointmentService {
 
         for (AppointmentSlotService.SlotRule slotRule : appointmentSlotService.buildDailySlotRules(date)) {
             long totalBookedPatients = candidateDoctorIds.stream()
-                    .mapToLong(doctorId -> appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end()))
+                    .mapToLong(doctorId -> appointmentSlotService.countBookedSlots(doctorId, slotRule.start()))
                     .sum();
             int totalMaxPatients = slotRule.maxPatients() * candidateDoctorIds.size();
             boolean hasAvailableDoctor = candidateDoctorIds.stream()
-                    .anyMatch(doctorId -> appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end()) < slotRule.maxPatients());
+                    .anyMatch(doctorId -> appointmentSlotService.hasRemainingSlot(doctorId, slotRule.start()));
             boolean full = candidateDoctorIds.isEmpty() || !hasAvailableDoctor;
             String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart, maxBookableDate);
             boolean disabled = disabledReason != null;
@@ -335,8 +335,7 @@ public class AppointmentService {
 
         for (Integer doctorId : orderedDoctorIds) {
             Doctor lockedDoctor = fetchDoctorForUpdate(doctorId);
-            long currentCount = appointmentRepository.countByDoctorInSlot(lockedDoctor.getId(), slotRule.start(), slotRule.end());
-            if (currentCount < slotRule.maxPatients()) {
+            if (appointmentSlotService.hasRemainingSlot(lockedDoctor.getId(), slotRule.start())) {
                 return lockedDoctor;
             }
         }

@@ -1,6 +1,6 @@
 package com.medcare.clinic_backend.service;
 
-import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
+import com.medcare.clinic_backend.dto.AppointmentSlotResponse;
 import com.medcare.clinic_backend.dto.DoctorResponse;
 import com.medcare.clinic_backend.dto.doctor.*;
 import com.medcare.clinic_backend.entity.*;
@@ -79,6 +79,9 @@ public class DoctorPortalService {
 
     @Autowired
     private DoctorScheduleRepository doctorScheduleRepository;
+
+    @Autowired
+    private AppointmentSlotService appointmentSlotService;
 
     @Autowired
     private PatientRepository patientRepository;
@@ -751,44 +754,33 @@ public class DoctorPortalService {
                 .collect(Collectors.toList());
     }
 
-    public List<SlotAvailabilityDto> getFollowUpSlots(String username, LocalDate date) {
+    public List<AppointmentSlotResponse> getFollowUpSlots(String username, LocalDate date) {
         Doctor doctor = getDoctorByUsername(username);
         if (date == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu ngay can kiem tra slot tai kham.");
         }
+        return appointmentSlotService.getFollowUpSlotsForDoctor(doctor.getId(), date);
+    }
 
-        LocalDateTime serverNow = LocalDateTime.now();
-        boolean hasConfiguredSchedule = doctorScheduleRepository.countByDoctorId(doctor.getId()) > 0;
-        Set<String> availableShifts = doctorScheduleRepository.findByDoctorIdAndWorkDate(doctor.getId(), date).stream()
-                .map(DoctorSchedule::getShift)
-                .map(this::normalizeScheduleShift)
-                .collect(Collectors.toSet());
-
-        List<SlotAvailabilityDto> result = new ArrayList<>();
-        for (SlotRule slotRule : buildFollowUpSlotRules(date)) {
-            // Sử dụng chính xác các trường từ slotRule: start() và end() là LocalDateTime
-            long bookedPatients = appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end());
-            boolean full = bookedPatients >= slotRule.maxPatients();
-            String disabledReason = resolveFollowUpSlotDisabledReason(
-                    slotRule,
-                    serverNow,
-                    hasConfiguredSchedule,
-                    availableShifts,
-                    full
-            );
-
-            result.add(new SlotAvailabilityDto(
-                    slotRule.start(),
-                    slotRule.end(),
-                    slotRule.shift().toLowerCase(Locale.ROOT),
-                    slotRule.maxPatients(),
-                    bookedPatients,
-                    full,
-                    disabledReason != null,
-                    disabledReason
-            ));
+    public List<AppointmentSlotResponse> getFollowUpSlotsByAppointmentId(
+            String username,
+            Integer appointmentId,
+            LocalDate date
+    ) {
+        if (date == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu ngay can kiem tra slot tai kham.");
         }
-        return result;
+
+        Doctor doctor = getDoctorByUsername(username);
+        Appointment appointment = findAppointmentForCurrentDoctorOrThrow(appointmentId, doctor);
+        validateAppointmentBelongsToCurrentDoctor(appointment, doctor);
+
+        Integer doctorId = appointment.getDoctor() == null ? null : appointment.getDoctor().getId();
+        if (doctorId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich hen khong co bac si, khong the lay slot tai kham.");
+        }
+
+        return appointmentSlotService.getFollowUpSlotsForDoctor(doctorId, date);
     }
 
     public DoctorProfileResponse getProfile(String username) {
@@ -950,7 +942,9 @@ public class DoctorPortalService {
         }
         validateSourceAppointmentContext(sourceAppointment);
         Integer doctorId = sourceAppointment.getDoctor() == null ? null : sourceAppointment.getDoctor().getId();
-        validateDoctorDateTimeAvailableForFollowUp(doctorId, followUpDateTime);
+        doctorRepository.findByIdForUpdate(doctorId)
+                .orElseThrow(() -> buildFollowUpValidationException("Khong xac dinh duoc bac si de tao lich tai kham."));
+        appointmentSlotService.validateFollowUpSlotAvailability(doctorId, followUpDateTime);
         Specialty followUpSpecialty = resolveFollowUpSpecialty(sourceAppointment);
         String normalizedNote = trimToNull(note);
 
@@ -970,6 +964,11 @@ public class DoctorPortalService {
         followUp.setSymptoms(null);
         followUp.setConsultationFee(resolveConsultationFeeByType("T\u00e1i kh\u00e1m", sourceAppointment.getDoctor()));
         followUp.setAppointmentCode(generateAppointmentCode());
+
+        if (!appointmentSlotService.hasRemainingSlot(doctorId, followUpDateTime)) {
+            throw buildFollowUpValidationException(appointmentSlotService.buildSlotFullMessage(followUpDateTime));
+        }
+
         Appointment savedFollowUp = appointmentRepository.saveAndFlush(followUp);
         return savedFollowUp == null ? followUp : savedFollowUp;
     }
@@ -1237,100 +1236,6 @@ public class DoctorPortalService {
         return null;
     }
 
-    private SlotRule resolveFollowUpSlotRule(LocalDate date, LocalTime time) {
-        if (date == null || time == null) {
-            throw buildFollowUpValidationException(
-                    "Khung gio tai kham khong hop le.",
-                    Map.of("followUpTime", "Vui long cung cap followUpTime theo dinh dang HH:mm.")
-            );
-        }
-
-        LocalDateTime followUpDateTime = LocalDateTime.of(date, time).withSecond(0).withNano(0);
-        for (SlotRule slotRule : buildFollowUpSlotRules(date)) {
-            if (slotRule.start().equals(followUpDateTime)) {
-                return slotRule;
-            }
-        }
-
-        throw buildFollowUpValidationException(
-                "Khung gio tai kham khong hop le.",
-                Map.of(
-                        "followUpTime",
-                        "Gio hop le: 07:30, 08:00, 09:00, 10:00, 12:30, 13:00, 14:00, 15:00."
-                )
-        );
-    }
-
-    private List<SlotRule> buildFollowUpSlotRules(LocalDate date) {
-        return List.of(
-                new SlotRule(date, date.atTime(7, 30), date.atTime(8, 0), "MORNING", 3),
-                new SlotRule(date, date.atTime(8, 0), date.atTime(9, 0), "MORNING", 5),
-                new SlotRule(date, date.atTime(9, 0), date.atTime(10, 0), "MORNING", 5),
-                new SlotRule(date, date.atTime(10, 0), date.atTime(11, 0), "MORNING", 5),
-                new SlotRule(date, date.atTime(12, 30), date.atTime(13, 0), "AFTERNOON", 3),
-                new SlotRule(date, date.atTime(13, 0), date.atTime(14, 0), "AFTERNOON", 5),
-                new SlotRule(date, date.atTime(14, 0), date.atTime(15, 0), "AFTERNOON", 5),
-                new SlotRule(date, date.atTime(15, 0), date.atTime(16, 0), "AFTERNOON", 5)
-        );
-    }
-
-    private void validateDoctorScheduleForFollowUp(Integer doctorId, SlotRule slotRule) {
-        if (doctorId == null || slotRule == null) {
-            throw buildFollowUpValidationException("Khong xac dinh duoc bac si de tao lich tai kham.");
-        }
-
-        if (doctorScheduleRepository.countByDoctorId(doctorId) == 0) {
-            return;
-        }
-
-        List<DoctorSchedule> schedules = doctorScheduleRepository.findByDoctorIdAndWorkDate(doctorId, slotRule.date());
-        if (schedules.isEmpty()) {
-            throw buildFollowUpValidationException(
-                    "Bac si khong co lich lam viec vao ngay tai kham da chon.",
-                    Map.of("followUpDate", "Bac si khong co lich lam viec vao ngay nay.")
-            );
-        }
-
-        boolean matchesShift = schedules.stream()
-                .map(DoctorSchedule::getShift)
-                .map(this::normalizeScheduleShift)
-                .anyMatch(shift -> "ALL_DAY".equals(shift) || slotRule.shift().equals(shift));
-        if (!matchesShift) {
-            throw buildFollowUpValidationException(
-                    "Bac si khong co lich lam viec trong khung gio tai kham da chon.",
-                    Map.of("followUpTime", "Bac si khong co lich lam viec trong buoi cua gio nay.")
-            );
-        }
-    }
-
-    private void validateDoctorAvailabilityForFollowUp(Integer doctorId, SlotRule slotRule) {
-        if (doctorId == null || slotRule == null) {
-            throw buildFollowUpValidationException("Khong xac dinh duoc bac si de tao lich tai kham.");
-        }
-
-        long appointmentCount = appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end());
-        if (appointmentCount >= slotRule.maxPatients()) {
-            throw buildFollowUpValidationException(
-                    "Khung gio tai kham da full.",
-                    Map.of("followUpTime", "Khung gio nay da du so luong benh nhan toi da.")
-            );
-        }
-    }
-
-    private void validateDoctorDateTimeAvailableForFollowUp(Integer doctorId, LocalDateTime appointmentDateTime) {
-        if (doctorId == null || appointmentDateTime == null) {
-            throw buildFollowUpValidationException("Khong xac dinh duoc bac si hoac thoi gian de tao lich tai kham.");
-        }
-
-        long duplicateCount = appointmentRepository.countActiveByDoctorIdAndAppointmentDate(doctorId, appointmentDateTime);
-        if (duplicateCount > 0) {
-            throw buildFollowUpValidationException(
-                    "Bac si da co lich hen tai dung thoi diem tai kham nay.",
-                    Map.of("followUpTime", "Bac si da co lich hen tai ngay gio nay.")
-            );
-        }
-    }
-
     private Specialty resolveFollowUpSpecialty(Appointment sourceAppointment) {
         Specialty sourceSpecialty = sourceAppointment == null ? null : sourceAppointment.getSpecialty();
         if (sourceSpecialty != null && sourceSpecialty.getId() != null) {
@@ -1348,55 +1253,6 @@ public class DoctorPortalService {
             throw buildFollowUpValidationException("Khong xac dinh duoc chuyen khoa de tao lich tai kham.");
         }
         return doctorSpecialty;
-    }
-
-    private String resolveFollowUpSlotDisabledReason(
-            SlotRule slotRule,
-            LocalDateTime serverNow,
-            boolean hasConfiguredSchedule,
-            Set<String> availableShifts,
-            boolean full
-    ) {
-        if (slotRule == null) {
-            return "INVALID_SLOT";
-        }
-        if (slotRule.start().isBefore(serverNow)) {
-            return "PAST";
-        }
-
-        String scheduleReason = resolveDoctorScheduleDisabledReason(hasConfiguredSchedule, availableShifts, slotRule.shift());
-        if (scheduleReason != null) {
-            return scheduleReason;
-        }
-        if (full) {
-            return "FULL";
-        }
-        return null;
-    }
-
-    private String resolveDoctorScheduleDisabledReason(
-            boolean hasConfiguredSchedule,
-            Set<String> availableShifts,
-            String slotShift
-    ) {
-        if (!hasConfiguredSchedule) {
-            return null;
-        }
-        if (availableShifts == null || availableShifts.isEmpty()) {
-            return "NO_SCHEDULE";
-        }
-        String normalizedShift = normalizeScheduleShift(slotShift);
-        if (availableShifts.contains("ALL_DAY") || availableShifts.contains(normalizedShift)) {
-            return null;
-        }
-        return "SHIFT_UNAVAILABLE";
-    }
-
-    private String normalizeScheduleShift(String shift) {
-        if (shift == null) {
-            return "";
-        }
-        return shift.trim().toUpperCase(Locale.ROOT);
     }
 
     private boolean canDoctorExamine(Appointment appointment) {
@@ -1975,9 +1831,6 @@ public class DoctorPortalService {
     }
 
     private record FollowUpRequestPayload(LocalDate followUpDate, LocalTime followUpTime, String note) {
-    }
-
-    private record SlotRule(LocalDate date, LocalDateTime start, LocalDateTime end, String shift, int maxPatients) {
     }
 
     private enum AppointmentStatusFilter {

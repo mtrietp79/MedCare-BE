@@ -1,6 +1,6 @@
 package com.medcare.clinic_backend.controller;
 
-import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
+import com.medcare.clinic_backend.dto.AppointmentSlotResponse;
 import com.medcare.clinic_backend.dto.doctor.CompleteAppointmentRequest;
 import com.medcare.clinic_backend.dto.doctor.CompleteAppointmentResponse;
 import com.medcare.clinic_backend.dto.doctor.CreateFollowUpRequest;
@@ -338,34 +338,37 @@ class DoctorPortalControllerTest {
     void getFollowUpSlots_shouldExposeDoctorFollowUpAvailability() throws Exception {
         when(doctorPortalService.getFollowUpSlots("doctor1", LocalDate.of(2026, 6, 14)))
                 .thenReturn(List.of(
-                        new SlotAvailabilityDto(
-                                LocalDateTime.of(2026, 6, 14, 8, 0),
-                                LocalDateTime.of(2026, 6, 14, 9, 0),
-                                "MORNING",
-                                5,
-                                1,
-                                false,
-                                false,
-                                null
-                        ),
-                        new SlotAvailabilityDto(
-                                LocalDateTime.of(2026, 6, 14, 14, 0),
-                                LocalDateTime.of(2026, 6, 14, 15, 0),
-                                "AFTERNOON",
-                                5,
-                                0,
-                                false,
-                                true,
-                                "SHIFT_UNAVAILABLE"
-                        )
+                        new AppointmentSlotResponse("08:00", 5, 1, 4, true),
+                        new AppointmentSlotResponse("14:00", 5, 0, 5, false)
                 ));
 
         mockMvc.perform(get("/api/doctor/follow-up-slots?date=2026-06-14")
                         .principal(new TestingAuthenticationToken("doctor1", null)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].startTime").value("2026-06-14T08:00:00"))
-                .andExpect(jsonPath("$[0].disabled").value(false))
-                .andExpect(jsonPath("$[1].disabled").value(true))
-                .andExpect(jsonPath("$[1].disabledReason").value("SHIFT_UNAVAILABLE"));
+                .andExpect(jsonPath("$[0].time").value("08:00"))
+                .andExpect(jsonPath("$[0].available").value(true))
+                .andExpect(jsonPath("$[0].remainingSlots").value(4))
+                .andExpect(jsonPath("$[1].available").value(false))
+                .andExpect(jsonPath("$[1].remainingSlots").value(5));
+    }
+
+    @Test
+    void getFollowUpSlotsByAppointment_shouldExposeSharedSlotAvailability() throws Exception {
+        when(doctorPortalService.getFollowUpSlotsByAppointmentId(
+                "doctor1",
+                12,
+                LocalDate.of(2026, 6, 12)
+        )).thenReturn(List.of(
+                new AppointmentSlotResponse("08:00", 5, 5, 0, false),
+                new AppointmentSlotResponse("09:00", 5, 0, 5, true)
+        ));
+
+        mockMvc.perform(get("/api/doctor/appointments/12/follow-up-slots?date=2026-06-12")
+                        .principal(new TestingAuthenticationToken("doctor1", null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].time").value("08:00"))
+                .andExpect(jsonPath("$[0].available").value(false))
+                .andExpect(jsonPath("$[1].time").value("09:00"))
+                .andExpect(jsonPath("$[1].available").value(true));
     }
 }

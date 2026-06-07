@@ -13,6 +13,25 @@ import com.medcare.clinic_backend.entity.Patient;
 
 public interface AppointmentRepository extends JpaRepository<Appointment, Integer> {
 
+    @Query("""
+            SELECT COUNT(a)
+            FROM Appointment a
+            WHERE a.doctor.id = :doctorId
+              AND a.appointmentDate = :slotDateTime
+              AND (
+                    a.status IS NULL
+                    OR (
+                        UPPER(a.status) <> 'CANCELLED'
+                        AND LOWER(a.status) NOT LIKE '%cancel%'
+                        AND LOWER(a.status) NOT LIKE '%huy%'
+                    )
+                  )
+            """)
+    long countBookedSlotsByDoctorAndSlotDateTime(
+            @Param("doctorId") Integer doctorId,
+            @Param("slotDateTime") LocalDateTime slotDateTime
+    );
+
     @Query("SELECT COUNT(a) FROM Appointment a WHERE a.doctor.id = :doctorId " +
             "AND a.appointmentDate >= :start AND a.appointmentDate < :end " +
             "AND a.status != 'CANCELLED'")

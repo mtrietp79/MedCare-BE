@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.service;
 
+import com.medcare.clinic_backend.dto.AppointmentSlotResponse;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.dto.doctor.DoctorAppointmentDetailResponse;
 import com.medcare.clinic_backend.dto.doctor.CompleteAppointmentRequest;
@@ -69,6 +70,9 @@ class DoctorPortalServiceTest {
     private DoctorScheduleRepository doctorScheduleRepository;
 
     @Mock
+    private AppointmentSlotService appointmentSlotService;
+
+    @Mock
     private PrescriptionDetailRepository prescriptionDetailRepository;
 
     @Mock
@@ -124,6 +128,8 @@ class DoctorPortalServiceTest {
         });
         when(medicalRecordRepository.saveAndFlush(any(MedicalRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(invoiceService.createInvoiceFromRecord(any(MedicalRecord.class))).thenReturn(invoice);
+        when(doctorRepository.findByIdForUpdate(currentDoctor.getId())).thenReturn(Optional.of(currentDoctor));
+        when(appointmentSlotService.hasRemainingSlot(eq(currentDoctor.getId()), any())).thenReturn(true);
         when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             if (saved.getId() == null) {
@@ -147,26 +153,62 @@ class DoctorPortalServiceTest {
     }
 
     @Test
+    void getFollowUpSlots_shouldDelegateToSharedSlotService() {
+        Doctor currentDoctor = buildDoctor(7);
+        stubCurrentDoctor(currentDoctor);
+
+        LocalDate followUpDate = LocalDate.now().plusDays(5);
+        List<AppointmentSlotResponse> expected = List.of(
+                new AppointmentSlotResponse("08:00", 5, 5, 0, false),
+                new AppointmentSlotResponse("09:00", 5, 0, 5, true)
+        );
+        when(appointmentSlotService.getFollowUpSlotsForDoctor(currentDoctor.getId(), followUpDate)).thenReturn(expected);
+
+        List<AppointmentSlotResponse> slots = doctorPortalService.getFollowUpSlots(USERNAME, followUpDate);
+
+        assertEquals(expected, slots);
+    }
+
+    @Test
+    void getFollowUpSlotsByAppointmentId_shouldUseDoctorFromAppointment() {
+        Doctor currentDoctor = buildDoctor(7);
+        stubCurrentDoctor(currentDoctor);
+
+        Appointment appointment = buildSourceAppointment(currentDoctor);
+        appointment.setId(55);
+        LocalDate followUpDate = LocalDate.of(2026, 6, 12);
+        List<AppointmentSlotResponse> expected = List.of(
+                new AppointmentSlotResponse("08:00", 5, 4, 1, true)
+        );
+
+        when(appointmentRepository.findByIdAndDoctorId(55, currentDoctor.getId())).thenReturn(Optional.of(appointment));
+        when(appointmentSlotService.getFollowUpSlotsForDoctor(currentDoctor.getId(), followUpDate)).thenReturn(expected);
+
+        List<AppointmentSlotResponse> slots = doctorPortalService.getFollowUpSlotsByAppointmentId(
+                USERNAME,
+                55,
+                followUpDate
+        );
+
+        assertEquals(expected, slots);
+    }
+
+    @Test
     void getFollowUpSlots_shouldDisableShiftsOutsideDoctorSchedule() {
         Doctor currentDoctor = buildDoctor(7);
         stubCurrentDoctor(currentDoctor);
 
         LocalDate followUpDate = LocalDate.now().plusDays(5);
-        when(doctorScheduleRepository.countByDoctorId(currentDoctor.getId())).thenReturn(1L);
-        when(doctorScheduleRepository.findByDoctorIdAndWorkDate(currentDoctor.getId(), followUpDate))
-                .thenReturn(List.of(buildSchedule(currentDoctor, followUpDate, "MORNING")));
-        when(appointmentRepository.countByDoctorInSlot(eq(currentDoctor.getId()), any(), any())).thenReturn(0L);
+        List<AppointmentSlotResponse> expected = List.of(
+                new AppointmentSlotResponse("08:00", 5, 0, 5, true),
+                new AppointmentSlotResponse("13:00", 5, 0, 5, false)
+        );
+        when(appointmentSlotService.getFollowUpSlotsForDoctor(currentDoctor.getId(), followUpDate)).thenReturn(expected);
 
-        List<SlotAvailabilityDto> slots = doctorPortalService.getFollowUpSlots(USERNAME, followUpDate);
+        List<AppointmentSlotResponse> slots = doctorPortalService.getFollowUpSlots(USERNAME, followUpDate);
 
-        assertTrue(slots.stream().anyMatch(slot ->
-                "morning".equals(slot.shift()) && !slot.disabled()
-        ));
-        assertTrue(slots.stream().anyMatch(slot ->
-                "afternoon".equals(slot.shift())
-                        && slot.disabled()
-                        && "SHIFT_UNAVAILABLE".equals(slot.disabledReason())
-        ));
+        assertTrue(slots.stream().anyMatch(slot -> "08:00".equals(slot.time()) && slot.available()));
+        assertTrue(slots.stream().anyMatch(slot -> "13:00".equals(slot.time()) && !slot.available()));
     }
 
     @Test
@@ -213,10 +255,7 @@ class DoctorPortalServiceTest {
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(103)).thenReturn(Optional.of(record));
         when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
-        when(appointmentRepository.countActiveByDoctorIdAndAppointmentDate(
-                currentDoctor.getId(),
-                LocalDateTime.of(followUpDate, LocalTime.of(9, 0))
-        )).thenReturn(0L);
+        stubSuccessfulFollowUpSlotValidation(currentDoctor, followUpDate, LocalTime.of(9, 0));
         when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(503);
@@ -243,6 +282,7 @@ class DoctorPortalServiceTest {
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(1030)).thenReturn(Optional.of(record));
         when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
+        stubSuccessfulFollowUpSlotValidation(currentDoctor, followUpDate, LocalTime.of(9, 0));
         when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(503);
@@ -259,7 +299,7 @@ class DoctorPortalServiceTest {
     }
 
     @Test
-    void createFollowUp_shouldRejectWhenDoctorHasActiveAppointmentAtSameDateTime() {
+    void createFollowUp_shouldRejectWhenSlotIsFull() {
         Doctor currentDoctor = buildDoctor(7);
         LocalDate followUpDate = LocalDate.now().plusDays(3);
         stubCurrentDoctor(currentDoctor);
@@ -268,10 +308,14 @@ class DoctorPortalServiceTest {
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(104)).thenReturn(Optional.of(record));
         when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
-        when(appointmentRepository.countActiveByDoctorIdAndAppointmentDate(
-                currentDoctor.getId(),
-                LocalDateTime.of(followUpDate, LocalTime.of(9, 0))
-        )).thenReturn(1L);
+        when(doctorRepository.findByIdForUpdate(currentDoctor.getId())).thenReturn(Optional.of(currentDoctor));
+        org.mockito.Mockito.doThrow(new BusinessException(
+                org.springframework.http.HttpStatus.BAD_REQUEST,
+                "Khung gio 09:00 ngay " + followUpDate.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")) + " da het slot. Vui long chon khung gio khac."
+        )).when(appointmentSlotService).validateFollowUpSlotAvailability(
+                eq(currentDoctor.getId()),
+                eq(LocalDateTime.of(followUpDate, LocalTime.of(9, 0)))
+        );
 
         BusinessException ex = assertThrows(
                 BusinessException.class,
@@ -282,11 +326,7 @@ class DoctorPortalServiceTest {
                 )
         );
 
-        assertEquals("Bac si da co lich hen tai dung thoi diem tai kham nay.", ex.getMessage());
-        assertEquals(
-                "Bac si da co lich hen tai ngay gio nay.",
-                ex.getFieldErrors().get("followUpTime")
-        );
+        assertTrue(ex.getMessage().contains("da het slot"));
     }
 
     @Test
@@ -342,6 +382,7 @@ class DoctorPortalServiceTest {
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(107)).thenReturn(Optional.of(record));
         when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
+        stubSuccessfulFollowUpSlotValidation(currentDoctor, followUpDate, LocalTime.of(9, 0));
         when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(501);
@@ -554,6 +595,7 @@ class DoctorPortalServiceTest {
         when(medicalRecordRepository.findById(109)).thenReturn(Optional.of(record));
         when(appointmentRepository.findById(999)).thenReturn(Optional.empty());
         when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
+        stubSuccessfulFollowUpSlotValidation(currentDoctor, followUpDate, LocalTime.of(8, 0));
         when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(777);
@@ -647,6 +689,14 @@ class DoctorPortalServiceTest {
         assertEquals(2, patient.getTotalVisitCount());
         assertEquals(2, patient.getVisitCount());
         assertEquals(expectedLatestVisitDate, patient.getLatestVisitDate());
+    }
+
+    private void stubSuccessfulFollowUpSlotValidation(Doctor doctor, LocalDate followUpDate, LocalTime followUpTime) {
+        when(doctorRepository.findByIdForUpdate(doctor.getId())).thenReturn(Optional.of(doctor));
+        when(appointmentSlotService.hasRemainingSlot(
+                eq(doctor.getId()),
+                eq(LocalDateTime.of(followUpDate, followUpTime))
+        )).thenReturn(true);
     }
 
     private void stubCurrentDoctor(Doctor doctor) {

@@ -1,15 +1,18 @@
 package com.medcare.clinic_backend.service;
 
+import com.medcare.clinic_backend.dto.AppointmentSlotResponse;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.entity.DoctorSchedule;
+import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
 import com.medcare.clinic_backend.repository.DoctorScheduleRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -26,7 +29,36 @@ public class AppointmentSlotService {
     public static final int MIN_BOOKING_LEAD_HOURS = 2;
     public static final int MAX_BOOKING_AHEAD_DAYS = 30;
 
-    public List<SlotAvailabilityDto> getDoctorSlots(Integer doctorId, LocalDate date) {
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
+    private static final DateTimeFormatter SLOT_ERROR_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
+    public List<AppointmentSlotResponse> getDoctorSlots(Integer doctorId, LocalDate date) {
+        if (doctorId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu doctorId.");
+        }
+        if (date == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu ngay can kiem tra slot.");
+        }
+
+        List<AppointmentSlotResponse> result = new ArrayList<>();
+        for (SlotRule slotRule : buildDailySlotRules(date)) {
+            long bookedSlots = countBookedSlots(doctorId, slotRule.start());
+            int totalSlots = slotRule.maxPatients();
+            long remainingSlots = Math.max(0, totalSlots - bookedSlots);
+            boolean available = remainingSlots > 0;
+
+            result.add(new AppointmentSlotResponse(
+                    slotRule.start().toLocalTime().format(TIME_FORMATTER),
+                    totalSlots,
+                    bookedSlots,
+                    remainingSlots,
+                    available
+            ));
+        }
+        return result;
+    }
+
+    public List<SlotAvailabilityDto> getDoctorSlotsForPatientBooking(Integer doctorId, LocalDate date) {
         LocalDateTime serverNow = LocalDateTime.now();
         LocalDateTime minAllowedStart = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
         LocalDate maxBookableDate = serverNow.toLocalDate().plusDays(MAX_BOOKING_AHEAD_DAYS);
@@ -39,10 +71,17 @@ public class AppointmentSlotService {
 
         List<SlotAvailabilityDto> result = new ArrayList<>();
         for (SlotRule slotRule : buildDailySlotRules(date)) {
-            long bookedSlots = appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end());
-            boolean full = bookedSlots >= slotRule.maxPatients();
+            long bookedSlots = countBookedSlots(doctorId, slotRule.start());
+            int totalSlots = slotRule.maxPatients();
+            boolean full = bookedSlots >= totalSlots;
 
-            String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart, maxBookableDate);
+            String disabledReason = resolvePatientDisabledReason(
+                    slotRule.start(),
+                    full,
+                    serverNow,
+                    minAllowedStart,
+                    maxBookableDate
+            );
             if (disabledReason == null) {
                 disabledReason = resolveDoctorScheduleDisabledReason(hasConfiguredSchedule, availableShifts, slotRule.shift());
             }
@@ -53,7 +92,7 @@ public class AppointmentSlotService {
                     slotRule.start(),
                     slotRule.end(),
                     slotRule.shift().toLowerCase(Locale.ROOT),
-                    slotRule.maxPatients(),
+                    totalSlots,
                     bookedSlots,
                     full,
                     disabled,
@@ -63,45 +102,142 @@ public class AppointmentSlotService {
         return result;
     }
 
+    public List<AppointmentSlotResponse> getFollowUpSlotsForDoctor(Integer doctorId, LocalDate date) {
+        LocalDateTime serverNow = LocalDateTime.now();
+        return getDoctorSlots(doctorId, date).stream()
+                .map(slot -> {
+                    LocalDateTime slotStart = LocalDateTime.of(date, java.time.LocalTime.parse(slot.time()));
+                    if (slotStart.isBefore(serverNow)) {
+                        return new AppointmentSlotResponse(
+                                slot.time(),
+                                slot.totalSlots(),
+                                slot.bookedSlots(),
+                                slot.remainingSlots(),
+                                false
+                        );
+                    }
+                    return slot;
+                })
+                .toList();
+    }
+
+    public long countBookedSlots(Integer doctorId, LocalDateTime slotDateTime) {
+        LocalDateTime normalized = normalizeSlotDateTime(slotDateTime);
+        return appointmentRepository.countBookedSlotsByDoctorAndSlotDateTime(doctorId, normalized);
+    }
+
     public void validateSlotAvailability(Integer doctorId, LocalDateTime slotDateTime) {
-        LocalDate date = slotDateTime.toLocalDate();
-        List<SlotAvailabilityDto> slots = getDoctorSlots(doctorId, date);
+        LocalDateTime normalized = normalizeSlotDateTime(slotDateTime);
+        findSlotRule(normalized);
 
-        SlotAvailabilityDto targetSlot = slots.stream()
-                .filter(s -> s.startTime().equals(slotDateTime))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Khung giờ không hợp lệ: " + slotDateTime.toLocalTime()));
-
-        if (targetSlot.disabled()) {
-            String reason = targetSlot.disabledReason();
-            if ("FULL".equals(reason)) {
-                throw new IllegalStateException("Khung giờ " + slotDateTime.toLocalTime() + " ngày " + date + " đã hết slot. Vui lòng chọn khung giờ khác.");
-            } else {
-                throw new IllegalStateException("Khung giờ " + slotDateTime.toLocalTime() + " ngày " + date + " không khả dụng (" + reason + ").");
-            }
+        if (!hasRemainingSlot(doctorId, normalized)) {
+            throw new BusinessException(
+                    HttpStatus.BAD_REQUEST,
+                    buildSlotFullMessage(normalized)
+            );
         }
     }
 
-    private String resolveDisabledReason(LocalDateTime slotStart, boolean full, LocalDateTime serverNow, LocalDateTime minAllowedStart, LocalDate maxBookableDate) {
-        if (full) return "FULL";
-        if (slotStart.isBefore(serverNow)) return "PAST_TIME";
-        if (slotStart.isBefore(minAllowedStart)) return "TOO_SOON";
-        if (slotStart.toLocalDate().isAfter(maxBookableDate)) return "TOO_FAR_AHEAD";
+    public void validateFollowUpSlotAvailability(Integer doctorId, LocalDateTime slotDateTime) {
+        LocalDateTime normalized = normalizeSlotDateTime(slotDateTime);
+        findSlotRule(normalized);
+
+        if (normalized.isBefore(LocalDateTime.now())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thoi gian tai kham khong duoc o qua khu.");
+        }
+
+        if (!hasRemainingSlot(doctorId, normalized)) {
+            throw new BusinessException(
+                    HttpStatus.BAD_REQUEST,
+                    buildSlotFullMessage(normalized)
+            );
+        }
+    }
+
+    public SlotRule findSlotRule(LocalDateTime slotDateTime) {
+        LocalDateTime normalized = normalizeSlotDateTime(slotDateTime);
+        for (SlotRule slotRule : buildDailySlotRules(normalized.toLocalDate())) {
+            if (slotRule.start().equals(normalized)) {
+                return slotRule;
+            }
+        }
+        throw new BusinessException(
+                HttpStatus.BAD_REQUEST,
+                "Khung gio khong hop le. Chi ho tro 07:30, 08:00, 09:00, 10:00, 12:30, 13:00, 14:00, 15:00."
+        );
+    }
+
+    public boolean hasRemainingSlot(Integer doctorId, LocalDateTime slotDateTime) {
+        LocalDateTime normalized = normalizeSlotDateTime(slotDateTime);
+        SlotRule slotRule = findSlotRule(normalized);
+        long bookedSlots = countBookedSlots(doctorId, normalized);
+        return bookedSlots < slotRule.maxPatients();
+    }
+
+    public String buildSlotFullMessage(LocalDateTime slotDateTime) {
+        LocalDateTime normalized = normalizeSlotDateTime(slotDateTime);
+        return "Khung gio "
+                + normalized.toLocalTime().format(TIME_FORMATTER)
+                + " ngay "
+                + normalized.toLocalDate().format(SLOT_ERROR_DATE_FORMATTER)
+                + " da het slot. Vui long chon khung gio khac.";
+    }
+
+    private LocalDateTime normalizeSlotDateTime(LocalDateTime slotDateTime) {
+        if (slotDateTime == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu thoi gian slot.");
+        }
+        return slotDateTime.withSecond(0).withNano(0);
+    }
+
+    private String resolvePatientDisabledReason(
+            LocalDateTime slotStart,
+            boolean full,
+            LocalDateTime serverNow,
+            LocalDateTime minAllowedStart,
+            LocalDate maxBookableDate
+    ) {
+        if (full) {
+            return "FULL";
+        }
+        if (slotStart.isBefore(serverNow)) {
+            return "PAST_TIME";
+        }
+        if (slotStart.isBefore(minAllowedStart)) {
+            return "TOO_SOON";
+        }
+        if (slotStart.toLocalDate().isAfter(maxBookableDate)) {
+            return "TOO_FAR_AHEAD";
+        }
         return null;
     }
 
     private String resolveDoctorScheduleDisabledReason(boolean hasConfiguredSchedule, Set<String> availableShifts, String slotShift) {
-        if (!hasConfiguredSchedule) return null;
-        if (availableShifts.contains(slotShift)) return null;
+        if (!hasConfiguredSchedule) {
+            return null;
+        }
+        if (availableShifts == null || availableShifts.isEmpty()) {
+            return "NO_SCHEDULE";
+        }
+        String normalizedShift = normalizeScheduleShift(slotShift);
+        if (availableShifts.contains("ALL_DAY") || availableShifts.contains(normalizedShift)) {
+            return null;
+        }
         return "SHIFT_UNAVAILABLE";
     }
 
     private String normalizeScheduleShift(String shift) {
-        if (shift == null) return "UNKNOWN";
-        String s = shift.toUpperCase(Locale.ROOT).trim();
-        if (s.contains("SANG") || s.contains("MORNING")) return "MORNING";
-        if (s.contains("CHIEU") || s.contains("AFTERNOON")) return "AFTERNOON";
-        return s;
+        if (shift == null) {
+            return "UNKNOWN";
+        }
+        String normalized = shift.trim().toUpperCase(Locale.ROOT);
+        if (normalized.contains("SANG") || normalized.contains("MORNING")) {
+            return "MORNING";
+        }
+        if (normalized.contains("CHIEU") || normalized.contains("AFTERNOON")) {
+            return "AFTERNOON";
+        }
+        return normalized;
     }
 
     public List<SlotRule> buildDailySlotRules(LocalDate date) {

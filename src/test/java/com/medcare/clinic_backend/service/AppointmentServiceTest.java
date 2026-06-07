@@ -39,6 +39,9 @@ class AppointmentServiceTest {
     @Mock
     private DoctorScheduleRepository doctorScheduleRepository;
 
+    @Mock
+    private AppointmentSlotService appointmentSlotService;
+
     @InjectMocks
     private AppointmentService appointmentService;
 
@@ -48,9 +51,18 @@ class AppointmentServiceTest {
         LocalDate date = LocalDate.now().plusDays(5);
 
         when(doctorRepository.findById(7)).thenReturn(Optional.of(doctor));
-        when(doctorScheduleRepository.countByDoctorId(7)).thenReturn(1L);
-        when(doctorScheduleRepository.findByDoctorIdAndWorkDate(7, date)).thenReturn(List.of());
-        when(appointmentRepository.countByDoctorInSlot(eq(7), any(), any())).thenReturn(0L);
+        when(appointmentSlotService.getDoctorSlotsForPatientBooking(7, date)).thenReturn(List.of(
+                new SlotAvailabilityDto(
+                        date.atTime(8, 0),
+                        date.atTime(9, 0),
+                        "morning",
+                        5,
+                        0,
+                        false,
+                        true,
+                        "NO_SCHEDULE"
+                )
+        ));
 
         List<SlotAvailabilityDto> slots = appointmentService.getDoctorSlotStatus(7, date);
 
@@ -65,18 +77,36 @@ class AppointmentServiceTest {
         LocalDate date = LocalDate.now().plusDays(6);
 
         when(doctorRepository.findById(7)).thenReturn(Optional.of(doctor));
-        when(doctorScheduleRepository.countByDoctorId(7)).thenReturn(1L);
-        when(doctorScheduleRepository.findByDoctorIdAndWorkDate(7, date))
-                .thenReturn(List.of(buildSchedule(doctor, date, "MORNING")));
-        when(appointmentRepository.countByDoctorInSlot(eq(7), any(), any())).thenReturn(0L);
+        when(appointmentSlotService.getDoctorSlotsForPatientBooking(7, date)).thenReturn(List.of(
+                new SlotAvailabilityDto(
+                        date.atTime(8, 0),
+                        date.atTime(9, 0),
+                        "morning",
+                        5,
+                        0,
+                        false,
+                        false,
+                        null
+                ),
+                new SlotAvailabilityDto(
+                        date.atTime(13, 0),
+                        date.atTime(14, 0),
+                        "afternoon",
+                        5,
+                        0,
+                        false,
+                        true,
+                        "SHIFT_UNAVAILABLE"
+                )
+        ));
 
         List<SlotAvailabilityDto> slots = appointmentService.getDoctorSlotStatus(7, date);
 
         assertTrue(slots.stream().anyMatch(slot ->
-                "MORNING".equals(slot.shift()) && !slot.disabled()
+                "morning".equals(slot.shift()) && !slot.disabled()
         ));
         assertTrue(slots.stream().anyMatch(slot ->
-                "AFTERNOON".equals(slot.shift())
+                "afternoon".equals(slot.shift())
                         && slot.disabled()
                         && "SHIFT_UNAVAILABLE".equals(slot.disabledReason())
         ));
