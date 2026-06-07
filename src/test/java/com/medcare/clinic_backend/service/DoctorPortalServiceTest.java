@@ -160,10 +160,10 @@ class DoctorPortalServiceTest {
         List<SlotAvailabilityDto> slots = doctorPortalService.getFollowUpSlots(USERNAME, followUpDate);
 
         assertTrue(slots.stream().anyMatch(slot ->
-                "MORNING".equals(slot.shift()) && !slot.disabled()
+                "morning".equals(slot.shift()) && !slot.disabled()
         ));
         assertTrue(slots.stream().anyMatch(slot ->
-                "AFTERNOON".equals(slot.shift())
+                "afternoon".equals(slot.shift())
                         && slot.disabled()
                         && "SHIFT_UNAVAILABLE".equals(slot.disabledReason())
         ));
@@ -212,7 +212,7 @@ class DoctorPortalServiceTest {
         Appointment sourceAppointment = buildSourceAppointment(currentDoctor);
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(103)).thenReturn(Optional.of(record));
-        when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
+        when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
         when(appointmentRepository.countActiveByDoctorIdAndAppointmentDate(
                 currentDoctor.getId(),
                 LocalDateTime.of(followUpDate, LocalTime.of(9, 0))
@@ -242,7 +242,7 @@ class DoctorPortalServiceTest {
         Appointment sourceAppointment = buildSourceAppointment(currentDoctor);
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(1030)).thenReturn(Optional.of(record));
-        when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
+        when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
         when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(503);
@@ -267,7 +267,7 @@ class DoctorPortalServiceTest {
         Appointment sourceAppointment = buildSourceAppointment(currentDoctor);
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(104)).thenReturn(Optional.of(record));
-        when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
+        when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
         when(appointmentRepository.countActiveByDoctorIdAndAppointmentDate(
                 currentDoctor.getId(),
                 LocalDateTime.of(followUpDate, LocalTime.of(9, 0))
@@ -297,7 +297,7 @@ class DoctorPortalServiceTest {
         Appointment sourceAppointment = buildSourceAppointment(currentDoctor);
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(105)).thenReturn(Optional.of(record));
-        when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
+        when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
 
         LocalDate yesterday = LocalDate.now().minusDays(1);
         BusinessException ex = assertThrows(
@@ -341,7 +341,7 @@ class DoctorPortalServiceTest {
         Appointment sourceAppointment = buildSourceAppointment(currentDoctor);
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(107)).thenReturn(Optional.of(record));
-        when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
+        when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
         when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(501);
@@ -553,7 +553,7 @@ class DoctorPortalServiceTest {
 
         when(medicalRecordRepository.findById(109)).thenReturn(Optional.of(record));
         when(appointmentRepository.findById(999)).thenReturn(Optional.empty());
-        when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
+        when(appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())).thenReturn(false);
         when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(777);

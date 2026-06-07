@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class InvoiceResponse {
+    private String uniqueKey;
     private Integer id;
     private String sourceType;
     private Integer sourceId;

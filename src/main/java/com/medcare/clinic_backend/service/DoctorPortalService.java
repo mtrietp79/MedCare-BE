@@ -635,7 +635,7 @@ public class DoctorPortalService {
             throw buildFollowUpValidationException("Benh an khong hop le de tao lich tai kham.");
         }
         if (resolveFollowUpAppointment(record) != null
-                || appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())) {
+                || appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())) {
             throw buildFollowUpValidationException("Benh an nay da ton tai lich tai kham.");
         }
 
@@ -766,6 +766,7 @@ public class DoctorPortalService {
 
         List<SlotAvailabilityDto> result = new ArrayList<>();
         for (SlotRule slotRule : buildFollowUpSlotRules(date)) {
+            // Sử dụng chính xác các trường từ slotRule: start() và end() là LocalDateTime
             long bookedPatients = appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end());
             boolean full = bookedPatients >= slotRule.maxPatients();
             String disabledReason = resolveFollowUpSlotDisabledReason(
@@ -779,7 +780,7 @@ public class DoctorPortalService {
             result.add(new SlotAvailabilityDto(
                     slotRule.start(),
                     slotRule.end(),
-                    slotRule.shift(),
+                    slotRule.shift().toLowerCase(Locale.ROOT),
                     slotRule.maxPatients(),
                     bookedPatients,
                     full,
@@ -934,7 +935,7 @@ public class DoctorPortalService {
                     )
             );
         }
-        if (appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())) {
+        if (appointmentRepository.existsByParentAppointmentKey(sourceAppointment.getId())) {
             throw buildFollowUpValidationException("Da ton tai lich tai kham cho benh an nay.");
         }
 
@@ -985,14 +986,16 @@ public class DoctorPortalService {
         }
         double baseFee = doctorPrice.doubleValue();
         if (isFollowUpType(appointmentType)) {
+            // Tính phí 50% cho lịch tái khám
             return baseFee * 0.5;
         }
         return baseFee;
     }
 
     private boolean isFollowUpType(String type) {
+        if (type == null) return false;
         String normalized = foldText(type);
-        return normalized != null && normalized.contains("taikham");
+        return normalized != null && (normalized.contains("taikham") || normalized.contains("followup"));
     }
 
     private boolean isFollowUpAppointment(Appointment appointment) {

@@ -82,6 +82,8 @@ class FinanceServiceTest {
                 .thenReturn(List.of(followUpInvoice, postExamInvoice));
         when(servicePackageBookingRepository.findByPatientIdOrderByCreatedAtDesc(7))
                 .thenReturn(List.of(servicePackageBooking));
+        when(invoiceRepository.existsByAppointmentId(11)).thenReturn(false);
+        // when(invoiceRepository.existsByAppointmentId(12)).thenReturn(false); // Xóa stub dư thừa này vì isFollowUpType(appointmentType) sẽ return false sớm
         when(transactionLogRepository.findByAppointmentIdInOrderByCreatedAtDesc(anyList()))
                 .thenReturn(List.of(appointmentPendingLog));
         when(transactionLogRepository.findByInvoiceIdInOrderByCreatedAtDesc(anyList()))

@@ -55,6 +55,9 @@ public class AppointmentService {
     @Autowired
     private DoctorScheduleRepository doctorScheduleRepository;
 
+    @Autowired
+    private AppointmentSlotService appointmentSlotService;
+
     public List<Appointment> getAllAppointments() {
         return appointmentRepository.findAll();
     }
@@ -130,7 +133,7 @@ public class AppointmentService {
             Doctor doctor = fetchDoctorForUpdate(app.getDoctor().getId());
             ensureDoctorActiveForBooking(doctor);
             ensureSpecialtyForDoctor(app, doctor);
-            validateDoctorAvailability(doctor, slotRule, null);
+            appointmentSlotService.validateSlotAvailability(app.getDoctor().getId(), app.getAppointmentDate());
             applyDoctorPricing(app, doctor);
             return appointmentRepository.save(app);
         }
@@ -139,7 +142,7 @@ public class AppointmentService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Vui long cung cap it nhat chuyen khoa hoac bac si de dat lich.");
         }
 
-        Doctor selectedDoctor = findAvailableDoctorForSpecialty(app.getSpecialty().getId(), slotRule);
+        Doctor selectedDoctor = findAvailableDoctorForSpecialty(app.getSpecialty().getId(), appointmentSlotService.buildDailySlotRules(app.getAppointmentDate().toLocalDate()).stream().filter(r -> r.start().equals(app.getAppointmentDate())).findFirst().orElseThrow());
         if (selectedDoctor == null) {
             throw new BusinessException(HttpStatus.CONFLICT, "Hien tai tat ca bac si thuoc khoa nay da kin lich trong khung gio ban chon.");
         }
@@ -156,38 +159,8 @@ public class AppointmentService {
 
         Doctor doctor = fetchDoctor(doctorId);
         ensureDoctorActiveForBooking(doctor);
-        List<SlotAvailabilityDto> result = new ArrayList<>();
-        LocalDateTime serverNow = LocalDateTime.now();
-        LocalDateTime minAllowedStart = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
-        LocalDate maxBookableDate = serverNow.toLocalDate().plusDays(MAX_BOOKING_AHEAD_DAYS);
-        boolean hasConfiguredSchedule = doctorScheduleRepository.countByDoctorId(doctorId) > 0;
-        Set<String> availableShifts = doctorScheduleRepository.findByDoctorIdAndWorkDate(doctorId, date).stream()
-                .map(DoctorSchedule::getShift)
-                .map(this::normalizeScheduleShift)
-                .collect(Collectors.toSet());
 
-        for (SlotRule slotRule : buildDailySlotRules(date)) {
-            long bookedPatients = appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end());
-            boolean full = bookedPatients >= slotRule.maxPatients();
-            String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart, maxBookableDate);
-            if (disabledReason == null) {
-                disabledReason = resolveDoctorScheduleDisabledReason(hasConfiguredSchedule, availableShifts, slotRule.shift());
-            }
-            boolean disabled = disabledReason != null;
-
-            result.add(new SlotAvailabilityDto(
-                    slotRule.start(),
-                    slotRule.end(),
-                    slotRule.shift(),
-                    slotRule.maxPatients(),
-                    bookedPatients,
-                    full,
-                    disabled,
-                    disabledReason
-            ));
-        }
-
-        return result;
+        return appointmentSlotService.getDoctorSlots(doctorId, date);
     }
 
     public List<SlotAvailabilityDto> getMedicalServiceSlotStatus(Integer serviceId, LocalDate date) {
@@ -213,7 +186,7 @@ public class AppointmentService {
         LocalDateTime minAllowedStart = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
         LocalDate maxBookableDate = serverNow.toLocalDate().plusDays(MAX_BOOKING_AHEAD_DAYS);
 
-        for (SlotRule slotRule : buildDailySlotRules(date)) {
+        for (AppointmentSlotService.SlotRule slotRule : appointmentSlotService.buildDailySlotRules(date)) {
             long totalBookedPatients = candidateDoctorIds.stream()
                     .mapToLong(doctorId -> appointmentRepository.countByDoctorInSlot(doctorId, slotRule.start(), slotRule.end()))
                     .sum();
@@ -227,7 +200,7 @@ public class AppointmentService {
             result.add(new SlotAvailabilityDto(
                     slotRule.start(),
                     slotRule.end(),
-                    slotRule.shift(),
+                    slotRule.shift().toLowerCase(Locale.ROOT),
                     totalMaxPatients,
                     totalBookedPatients,
                     full,
@@ -263,12 +236,16 @@ public class AppointmentService {
                     ? appointmentDetails.getAppointmentDate()
                     : appointment.getAppointmentDate();
 
-            SlotRule slotRule = resolveSlotRule(targetDate);
+            AppointmentSlotService.SlotRule slotRule = appointmentSlotService.buildDailySlotRules(targetDate.toLocalDate()).stream()
+                    .filter(r -> r.start().equals(targetDate.withSecond(0).withNano(0)))
+                    .findFirst()
+                    .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "Khung gio khong hop le."));
+
             validateBookingTimeRule(slotRule.start());
             validatePatientAvailability(appointment.getPatient() == null ? null : appointment.getPatient().getId(), slotRule, appointment.getId());
             targetDoctor = fetchDoctorForUpdate(targetDoctorId);
             applyUpdatedSpecialty(appointment, appointmentDetails, targetDoctor);
-            validateDoctorAvailability(targetDoctor, slotRule, appointment.getId());
+            appointmentSlotService.validateSlotAvailability(targetDoctor.getId(), slotRule.start());
             appointment.setAppointmentDate(slotRule.start());
         } else {
             targetDoctor = fetchDoctor(targetDoctorId);
@@ -342,7 +319,7 @@ public class AppointmentService {
         appointmentRepository.deleteById(id);
     }
 
-    private Doctor findAvailableDoctorForSpecialty(Integer specialtyId, SlotRule slotRule) {
+    private Doctor findAvailableDoctorForSpecialty(Integer specialtyId, AppointmentSlotService.SlotRule slotRule) {
         List<Integer> candidateDoctorIds = doctorRepository.findBySpecialty_IdAndIsActiveTrue(specialtyId).stream()
                 .map(Doctor::getId)
                 .filter(id -> id != null)
@@ -421,7 +398,7 @@ public class AppointmentService {
         }
     }
 
-    private void validateDoctorAvailability(Doctor doctor, SlotRule slotRule, Integer excludedAppointmentId) {
+    private void validateDoctorAvailability(Doctor doctor, AppointmentSlotService.SlotRule slotRule, Integer excludedAppointmentId) {
         long count = excludedAppointmentId == null
                 ? appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end())
                 : appointmentRepository.countByDoctorInSlotExcludingAppointment(doctor.getId(), slotRule.start(), slotRule.end(), excludedAppointmentId);
@@ -431,7 +408,7 @@ public class AppointmentService {
         }
     }
 
-    private void validatePatientAvailability(Integer patientId, SlotRule slotRule, Integer excludedAppointmentId) {
+    private void validatePatientAvailability(Integer patientId, AppointmentSlotService.SlotRule slotRule, Integer excludedAppointmentId) {
         if (patientId == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong xac dinh duoc benh nhan dat lich.");
         }
@@ -714,13 +691,13 @@ public class AppointmentService {
         }
     }
 
-    private SlotRule resolveSlotRule(LocalDateTime appointmentDate) {
+    private AppointmentSlotService.SlotRule resolveSlotRule(LocalDateTime appointmentDate) {
         if (appointmentDate == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu thoi gian dat lich.");
         }
 
         LocalDateTime normalizedDateTime = appointmentDate.withSecond(0).withNano(0);
-        for (SlotRule slotRule : buildDailySlotRules(normalizedDateTime.toLocalDate())) {
+        for (AppointmentSlotService.SlotRule slotRule : appointmentSlotService.buildDailySlotRules(normalizedDateTime.toLocalDate())) {
             if (slotRule.start().equals(normalizedDateTime)) {
                 return slotRule;
             }
@@ -844,20 +821,6 @@ public class AppointmentService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private List<SlotRule> buildDailySlotRules(LocalDate date) {
-        return List.of(
-                new SlotRule(date, date.atTime(7, 30), date.atTime(8, 0), "MORNING", 3),
-                new SlotRule(date, date.atTime(8, 0), date.atTime(9, 0), "MORNING", 5),
-                new SlotRule(date, date.atTime(9, 0), date.atTime(10, 0), "MORNING", 5),
-                new SlotRule(date, date.atTime(10, 0), date.atTime(11, 0), "MORNING", 5),
-                new SlotRule(date, date.atTime(12, 30), date.atTime(13, 0), "AFTERNOON", 3),
-                new SlotRule(date, date.atTime(13, 0), date.atTime(14, 0), "AFTERNOON", 5),
-                new SlotRule(date, date.atTime(14, 0), date.atTime(15, 0), "AFTERNOON", 5),
-                new SlotRule(date, date.atTime(15, 0), date.atTime(16, 0), "AFTERNOON", 5)
-        );
-    }
-
-    private record SlotRule(LocalDate date, LocalDateTime start, LocalDateTime end, String shift, int maxPatients) {
-    }
+    // Logic Slot cũ đã được chuyển sang AppointmentSlotService
 }
 

@@ -218,6 +218,7 @@ public class FinanceService {
 
     private InvoiceResponse toAppointmentResponse(Appointment appointment, TransactionLog latestLog, TransactionLog paidLog) {
         InvoiceResponse response = new InvoiceResponse();
+        response.setUniqueKey("APPOINTMENT_INVOICE_" + appointment.getId());
         response.setId(appointment.getId());
         response.setSourceType(SOURCE_APPOINTMENT);
         response.setSourceId(appointment.getId());
@@ -281,11 +282,14 @@ public class FinanceService {
         }
 
         InvoiceResponse response = new InvoiceResponse();
+        String category = isFollowUpType(appointmentType) ? CATEGORY_FOLLOW_UP : CATEGORY_POST_EXAM;
+        String prefix = isFollowUpType(appointmentType) ? "FOLLOW_UP_INVOICE_" : "POST_EXAM_INVOICE_";
+        response.setUniqueKey(prefix + invoiceId);
         response.setId(invoiceId);
         response.setSourceType(SOURCE_INVOICE);
         response.setSourceId(invoiceId);
         response.setInvoiceCode(invoiceId == null ? null : "INV" + String.format("%06d", invoiceId));
-        response.setInvoiceCategory(isFollowUpType(appointmentType) ? CATEGORY_FOLLOW_UP : CATEGORY_POST_EXAM);
+        response.setInvoiceCategory(category);
         response.setInvoiceCategoryDisplay(isFollowUpType(appointmentType)
                 ? "H\u00f3a \u0111\u01a1n t\u00e1i kh\u00e1m"
                 : "H\u00f3a \u0111\u01a1n sau kh\u00e1m");
@@ -320,6 +324,7 @@ public class FinanceService {
 
     private InvoiceResponse toServicePackageResponse(ServicePackageBooking booking, TransactionLog paidLog) {
         InvoiceResponse response = new InvoiceResponse();
+        response.setUniqueKey("SERVICE_PACKAGE_BOOKING_" + booking.getId());
         response.setId(booking.getId());
         response.setSourceType(SOURCE_SERVICE_PACKAGE);
         response.setSourceId(booking.getId());
@@ -557,9 +562,15 @@ public class FinanceService {
     }
 
     private boolean shouldExposeAppointmentBookingInvoice(Appointment appointment) {
-        return appointment != null
-                && appointment.getId() != null
-                && !isFollowUpType(appointment.getAppointmentType());
+        if (appointment == null || appointment.getId() == null) {
+            return false;
+        }
+        // Không hiển thị hóa đơn đặt lịch cho tái khám (vì sẽ dùng hóa đơn tái khám riêng)
+        if (isFollowUpType(appointment.getAppointmentType())) {
+            return false;
+        }
+        // Nếu đã có hóa đơn (sau khám) trong bảng invoices thì ẩn hóa đơn đặt lịch ban đầu
+        return !invoiceRepository.existsByAppointmentId(appointment.getId());
     }
 
     private boolean canPayOnline(Appointment appointment) {

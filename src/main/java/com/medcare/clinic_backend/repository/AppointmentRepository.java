@@ -125,7 +125,7 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
             @Param("appointmentDate") LocalDateTime appointmentDate
     );
 
-    boolean existsByParentAppointmentId(Integer parentAppointmentId);
+    boolean existsByParentAppointmentKey(Integer parentAppointmentId);
 
     boolean existsByDoctorIdAndPatientId(Integer doctorId, Integer patientId);
 
