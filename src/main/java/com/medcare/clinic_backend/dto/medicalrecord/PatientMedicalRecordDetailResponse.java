@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.dto.medicalrecord;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -27,6 +28,36 @@ public class PatientMedicalRecordDetailResponse {
     private InvoiceInfo invoice;
     private FollowUpInfo followUpAppointment;
 
+    @JsonProperty("medicalRecordId")
+    public Integer getMedicalRecordId() {
+        return recordId;
+    }
+
+    @JsonProperty("appointmentId")
+    public Integer getAppointmentId() {
+        return appointment == null ? null : appointment.getId();
+    }
+
+    @JsonProperty("appointmentCode")
+    public String getAppointmentCode() {
+        return appointment == null ? null : appointment.getAppointmentCode();
+    }
+
+    @JsonProperty("appointmentType")
+    public String getAppointmentType() {
+        return appointment == null ? null : appointment.getType();
+    }
+
+    @JsonProperty("examDate")
+    public LocalDate getExamDate() {
+        return examinationDate;
+    }
+
+    @JsonProperty("symptoms")
+    public String getSymptoms() {
+        return appointment == null ? null : appointment.getSymptoms();
+    }
+
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
@@ -40,6 +71,11 @@ public class PatientMedicalRecordDetailResponse {
         private String statusColor;
         private String symptoms;
         private String note;
+
+        @JsonProperty("appointmentType")
+        public String getAppointmentType() {
+            return type;
+        }
     }
 
     @Data
@@ -95,6 +131,16 @@ public class PatientMedicalRecordDetailResponse {
         private Boolean canPayOnline;
         private LocalDateTime createdAt;
         private LocalDateTime paymentDate;
+
+        @JsonProperty("medicineTotal")
+        public Double getMedicineTotal() {
+            return medicineFee;
+        }
+
+        @JsonProperty("serviceTotal")
+        public Double getServiceTotal() {
+            return serviceFee;
+        }
     }
 
     @Data

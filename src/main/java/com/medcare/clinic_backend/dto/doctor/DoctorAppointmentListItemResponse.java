@@ -13,10 +13,13 @@ import java.time.LocalTime;
 @AllArgsConstructor
 public class DoctorAppointmentListItemResponse {
     private Integer id;
+    private String appointmentCode;
     private Integer patientId;
     private String patientName;
     private String patientPhone;
     private String patientEmail;
+    private String doctorName;
+    private String specialtyName;
     private LocalDate appointmentDate;
     private LocalTime appointmentTime;
     private String appointmentTimeLabel;
@@ -38,5 +41,10 @@ public class DoctorAppointmentListItemResponse {
     @JsonProperty("appointmentTypeCode")
     public String getAppointmentTypeCode() {
         return typeCode;
+    }
+
+    @JsonProperty("canComplete")
+    public boolean getCanComplete() {
+        return canExamine;
     }
 }

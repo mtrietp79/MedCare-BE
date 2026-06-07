@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.exception;
 
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,8 +8,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.orm.jpa.JpaObjectRetrievalFailureException;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -37,10 +42,66 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<Map<String, String>> handleDataIntegrityViolationException(DataIntegrityViolationException ex) {
+    public ResponseEntity<Map<String, Object>> handleDataIntegrityViolationException(
+            DataIntegrityViolationException ex,
+            HttpServletRequest request
+    ) {
         logger.error("Data integrity violation", ex);
+        if (isFollowUpEndpoint(request)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(buildFollowUpValidationBody(
+                            "Khong the tao lich tai kham do du lieu lich hen goc khong hop le hoac da bi trung.",
+                            Map.of()
+                    ));
+        }
+        if (isDoctorCompleteEndpoint(request)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", "Khong the hoan tat lich kham do du lieu lich hen hoac benh an khong hop le."));
+        }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("message", "Du lieu dang ky khong hop le hoac da ton tai (email/so dien thoai/username)."));
+    }
+
+    @ExceptionHandler({JpaObjectRetrievalFailureException.class, EntityNotFoundException.class})
+    public ResponseEntity<Map<String, Object>> handleEntityReferenceException(
+            RuntimeException ex,
+            HttpServletRequest request
+    ) {
+        logger.error("Entity reference resolution failed", ex);
+        if (isFollowUpEndpoint(request)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(buildFollowUpValidationBody(
+                            "Du lieu lich hen goc hoac lien ket tai kham khong hop le.",
+                            Map.of()
+                    ));
+        }
+        if (isDoctorCompleteEndpoint(request)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", "Du lieu lich hen, benh an hoac lien ket tai kham khong hop le."));
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("message", "Du lieu lien ket khong hop le hoac khong con ton tai."));
+    }
+
+    @ExceptionHandler({JpaSystemException.class, TransactionSystemException.class, UnexpectedRollbackException.class})
+    public ResponseEntity<Map<String, Object>> handlePersistenceSystemException(
+            RuntimeException ex,
+            HttpServletRequest request
+    ) {
+        logger.error("Persistence system exception", ex);
+        if (isFollowUpEndpoint(request)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(buildFollowUpValidationBody(
+                            "Khong the tao lich tai kham do du lieu lien ket hoac rang buoc luu tru khong hop le.",
+                            Map.of()
+                    ));
+        }
+        if (isDoctorCompleteEndpoint(request)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", "Khong the hoan tat lich kham do du lieu benh an hoac lich tai kham khong hop le."));
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("message", "Khong the luu du lieu do rang buoc he thong khong hop le."));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
@@ -104,6 +165,16 @@ public class GlobalExceptionHandler {
         return uri != null
                 && uri.contains("/api/doctor/medical-records/")
                 && uri.endsWith("/follow-up");
+    }
+
+    private boolean isDoctorCompleteEndpoint(HttpServletRequest request) {
+        if (request == null) {
+            return false;
+        }
+        String uri = request.getRequestURI();
+        return uri != null
+                && uri.contains("/api/doctor/appointments/")
+                && uri.endsWith("/complete");
     }
 
     private Map<String, Object> buildFollowUpValidationBody(String message, Map<String, String> fieldErrors) {

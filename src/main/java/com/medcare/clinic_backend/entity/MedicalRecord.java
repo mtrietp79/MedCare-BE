@@ -28,6 +28,9 @@ public class MedicalRecord {
     @JoinColumn(name = "appointment_id", nullable = false, unique = true)
     private Appointment appointment;
 
+    @Column(name = "appointment_id", insertable = false, updatable = false)
+    private Integer appointmentKey;
+
     @Column(name = "medical_record_code", length = 30, unique = true)
     private String medicalRecordCode;
 
@@ -38,6 +41,9 @@ public class MedicalRecord {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "follow_up_appointment_id")
     private Appointment followUpAppointment;
+
+    @Column(name = "follow_up_appointment_id", insertable = false, updatable = false)
+    private Integer followUpAppointmentKey;
 
     @Column(length = 50)
     private String type = "Khám bệnh";

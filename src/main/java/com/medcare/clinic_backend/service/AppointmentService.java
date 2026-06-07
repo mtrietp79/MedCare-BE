@@ -2,13 +2,16 @@ package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.dto.BookingRulesDto;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
+import com.medcare.clinic_backend.dto.patient.PatientAppointmentResponse;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
+import com.medcare.clinic_backend.entity.DoctorSchedule;
 import com.medcare.clinic_backend.entity.MedicalService;
 import com.medcare.clinic_backend.entity.ServicePackage;
 import com.medcare.clinic_backend.entity.Specialty;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
+import com.medcare.clinic_backend.repository.DoctorScheduleRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -19,10 +22,12 @@ import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -33,6 +38,7 @@ public class AppointmentService {
     private static final int MIN_BOOKING_LEAD_HOURS = 2;
     private static final int MAX_BOOKING_AHEAD_DAYS = 14;
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
     @Autowired
     private AppointmentRepository appointmentRepository;
@@ -46,12 +52,22 @@ public class AppointmentService {
     @Autowired
     private MedicalServiceService medicalServiceService;
 
+    @Autowired
+    private DoctorScheduleRepository doctorScheduleRepository;
+
     public List<Appointment> getAllAppointments() {
         return appointmentRepository.findAll();
     }
 
     public List<Appointment> getAppointmentsForPatient(Integer patientId) {
         return appointmentRepository.findByPatientIdOrderByAppointmentDateDesc(patientId);
+    }
+
+    public List<PatientAppointmentResponse> getAppointmentResponsesForPatient(Integer patientId) {
+        return appointmentRepository.findByPatientIdOrderByAppointmentDateDesc(patientId)
+                .stream()
+                .map(this::toPatientAppointmentResponse)
+                .toList();
     }
 
     public List<Appointment> getAppointmentsForDoctor(Integer doctorId) {
@@ -144,11 +160,19 @@ public class AppointmentService {
         LocalDateTime serverNow = LocalDateTime.now();
         LocalDateTime minAllowedStart = serverNow.plusHours(MIN_BOOKING_LEAD_HOURS);
         LocalDate maxBookableDate = serverNow.toLocalDate().plusDays(MAX_BOOKING_AHEAD_DAYS);
+        boolean hasConfiguredSchedule = doctorScheduleRepository.countByDoctorId(doctorId) > 0;
+        Set<String> availableShifts = doctorScheduleRepository.findByDoctorIdAndWorkDate(doctorId, date).stream()
+                .map(DoctorSchedule::getShift)
+                .map(this::normalizeScheduleShift)
+                .collect(Collectors.toSet());
 
         for (SlotRule slotRule : buildDailySlotRules(date)) {
             long bookedPatients = appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end());
             boolean full = bookedPatients >= slotRule.maxPatients();
             String disabledReason = resolveDisabledReason(slotRule.start(), full, serverNow, minAllowedStart, maxBookableDate);
+            if (disabledReason == null) {
+                disabledReason = resolveDoctorScheduleDisabledReason(hasConfiguredSchedule, availableShifts, slotRule.shift());
+            }
             boolean disabled = disabledReason != null;
 
             result.add(new SlotAvailabilityDto(
@@ -471,6 +495,31 @@ public class AppointmentService {
         return null;
     }
 
+    private String resolveDoctorScheduleDisabledReason(
+            boolean hasConfiguredSchedule,
+            Set<String> availableShifts,
+            String slotShift
+    ) {
+        if (!hasConfiguredSchedule) {
+            return null;
+        }
+        if (availableShifts == null || availableShifts.isEmpty()) {
+            return "NO_SCHEDULE";
+        }
+        String normalizedShift = normalizeScheduleShift(slotShift);
+        if (availableShifts.contains("ALL_DAY") || availableShifts.contains(normalizedShift)) {
+            return null;
+        }
+        return "SHIFT_UNAVAILABLE";
+    }
+
+    private String normalizeScheduleShift(String shift) {
+        if (shift == null) {
+            return "";
+        }
+        return shift.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
     private void ensureSpecialtyForDoctor(Appointment appointment, Doctor doctor) {
         Specialty doctorSpecialty = doctor.getSpecialty();
         if (doctorSpecialty == null || doctorSpecialty.getId() == null) {
@@ -687,6 +736,112 @@ public class AppointmentService {
             code = "PKB-" + System.currentTimeMillis();
         } while (appointmentRepository.existsByAppointmentCode(code));
         return code;
+    }
+
+    private PatientAppointmentResponse toPatientAppointmentResponse(Appointment appointment) {
+        LocalDateTime dateTime = appointment == null ? null : appointment.getAppointmentDate();
+        LocalTime appointmentTime = dateTime == null ? null : dateTime.toLocalTime();
+        String appointmentType = resolveAppointmentType(appointment);
+        return new PatientAppointmentResponse(
+                appointment == null ? null : appointment.getId(),
+                appointment == null ? null : appointment.getAppointmentCode(),
+                appointment == null ? null : appointment.getDoctorName(),
+                resolveSpecialtyName(appointment),
+                dateTime == null ? null : dateTime.toLocalDate(),
+                appointmentTime,
+                appointmentTime == null ? null : appointmentTime.format(TIME_FORMATTER),
+                appointmentType,
+                resolveStatusDisplay(appointment == null ? null : appointment.getStatus()),
+                appointment == null ? null : appointment.getConsultationFee(),
+                resolvePaymentStatusDisplay(appointment == null ? null : appointment.getPaymentStatus()),
+                appointment == null ? null : appointment.getParentAppointmentId(),
+                isFollowUpAppointment(appointment) ? resolveFollowUpNote(appointment) : null
+        );
+    }
+
+    private String resolveSpecialtyName(Appointment appointment) {
+        if (appointment == null) {
+            return null;
+        }
+        String specialtyName = appointment.getSpecialtyName();
+        if (specialtyName != null && !specialtyName.isBlank()) {
+            return specialtyName;
+        }
+        Doctor doctor = appointment.getDoctor();
+        return doctor == null || doctor.getSpecialty() == null ? null : doctor.getSpecialty().getName();
+    }
+
+    private boolean isFollowUpAppointment(Appointment appointment) {
+        return appointment != null
+                && (isFollowUpType(appointment.getAppointmentType())
+                || appointment.getParentAppointmentId() != null
+                || trimToNull(appointment.getFollowUpNote()) != null);
+    }
+
+    private String resolveAppointmentType(Appointment appointment) {
+        return isFollowUpAppointment(appointment) ? "T\u00e1i kh\u00e1m" : "Kh\u00e1m b\u1ec7nh";
+    }
+
+    private String resolveFollowUpNote(Appointment appointment) {
+        String followUpNote = appointment == null ? null : trimToNull(appointment.getFollowUpNote());
+        if (followUpNote != null) {
+            return followUpNote;
+        }
+        return appointment == null ? null : trimToNull(appointment.getNotes());
+    }
+
+    private String resolveStatusDisplay(String status) {
+        String normalized = normalizeTextForCompare(status);
+        if (normalized == null) {
+            return "Ch\u01b0a kh\u00e1m";
+        }
+        if (normalized.contains("cancel") || normalized.contains("huy")) {
+            return "H\u1ee7y l\u1ecbch";
+        }
+        if (normalized.contains("completed") || normalized.contains("dakham")) {
+            return "\u0110\u00e3 kh\u00e1m";
+        }
+        return "Ch\u01b0a kh\u00e1m";
+    }
+
+    private String resolvePaymentStatusDisplay(String status) {
+        String normalized = normalizeTextForCompare(status);
+        if (normalized == null || normalized.contains("unpaid") || normalized.contains("chuathanhtoan")) {
+            return "Ch\u01b0a thanh to\u00e1n";
+        }
+        if (normalized.equals("paid") || normalized.contains("paidonline") || normalized.contains("dathanhtoan")) {
+            return "\u0110\u00e3 thanh to\u00e1n";
+        }
+        if (normalized.contains("fail")) {
+            return "Thanh to\u00e1n th\u1ea5t b\u1ea1i";
+        }
+        if (normalized.contains("cancel") || normalized.contains("huy")) {
+            return "\u0110\u00e3 h\u1ee7y";
+        }
+        return "Ch\u01b0a thanh to\u00e1n";
+    }
+
+    private String normalizeTextForCompare(String value) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            return null;
+        }
+        return Normalizer.normalize(normalized, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('\u0111', 'd')
+                .replace('\u0110', 'D')
+                .toLowerCase(Locale.ROOT)
+                .replace(" ", "")
+                .replace("_", "")
+                .replace("-", "");
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private List<SlotRule> buildDailySlotRules(LocalDate date) {

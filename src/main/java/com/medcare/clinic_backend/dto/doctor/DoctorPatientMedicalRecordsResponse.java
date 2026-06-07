@@ -36,6 +36,7 @@ public class DoctorPatientMedicalRecordsResponse {
     public static class RecordItem {
         private Integer recordId;
         private Integer appointmentId;
+        private String appointmentCode;
         private LocalDateTime recordCreatedAt;
         private LocalDate examDate;
         private String type;
@@ -45,7 +46,13 @@ public class DoctorPatientMedicalRecordsResponse {
         private String doctorAdvice;
         private List<MedicineItem> medicines;
         private List<ServiceItem> services;
+        private InvoiceInfo invoice;
         private FollowUpAppointmentInfo followUpAppointment;
+
+        @JsonProperty("medicalRecordId")
+        public Integer getMedicalRecordId() {
+            return recordId;
+        }
 
         @JsonProperty("createdAt")
         public LocalDateTime getCreatedAt() {
@@ -85,6 +92,28 @@ public class DoctorPatientMedicalRecordsResponse {
     public static class ServiceItem {
         private String name;
         private Double price;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class InvoiceInfo {
+        private Integer id;
+        private Double consultationFee;
+        private Double medicineTotal;
+        private Double serviceTotal;
+        private Double totalAmount;
+        private String status;
+
+        @JsonProperty("medicineFee")
+        public Double getMedicineFee() {
+            return medicineTotal;
+        }
+
+        @JsonProperty("serviceFee")
+        public Double getServiceFee() {
+            return serviceTotal;
+        }
     }
 
     @Data

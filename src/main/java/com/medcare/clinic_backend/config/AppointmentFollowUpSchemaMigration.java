@@ -34,26 +34,6 @@ public class AppointmentFollowUpSchemaMigration implements ApplicationRunner {
                 """);
 
         jdbcTemplate.execute("""
-                do $$
-                begin
-                    if exists (
-                        select 1
-                        from information_schema.columns
-                        where table_schema = 'public'
-                          and table_name = 'appointments'
-                          and column_name = 'type'
-                    ) then
-                        execute '
-                            update public.appointments
-                            set appointment_type = type
-                            where (appointment_type is null or btrim(appointment_type) = '''')
-                              and type is not null and btrim(type) <> ''''
-                        ';
-                    end if;
-                end $$;
-                """);
-
-        jdbcTemplate.execute("""
                 update public.appointments
                 set appointment_type = 'Khám bệnh'
                 where appointment_type is null or btrim(appointment_type) = ''

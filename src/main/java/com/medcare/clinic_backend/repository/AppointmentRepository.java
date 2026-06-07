@@ -106,7 +106,28 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
 
     List<Appointment> findByDoctorIdAndAppointmentDate(Integer doctorId, LocalDateTime appointmentDate);
 
+    @Query("""
+            SELECT COUNT(a)
+            FROM Appointment a
+            WHERE a.doctor.id = :doctorId
+              AND a.appointmentDate = :appointmentDate
+              AND (
+                    a.status IS NULL
+                    OR (
+                        LOWER(a.status) NOT LIKE '%cancel%'
+                        AND LOWER(a.status) NOT LIKE '%huy%'
+                        AND LOWER(a.status) NOT LIKE '%hủy%'
+                    )
+                  )
+            """)
+    long countActiveByDoctorIdAndAppointmentDate(
+            @Param("doctorId") Integer doctorId,
+            @Param("appointmentDate") LocalDateTime appointmentDate
+    );
+
     boolean existsByParentAppointmentId(Integer parentAppointmentId);
+
+    boolean existsByDoctorIdAndPatientId(Integer doctorId, Integer patientId);
 
     @Query("SELECT DISTINCT a.patient FROM Appointment a WHERE a.doctor.id = :doctorId ORDER BY a.patient.fullName ASC")
     List<Patient> findDistinctPatientsByDoctorId(@Param("doctorId") Integer doctorId);
@@ -118,8 +139,6 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
             "WHERE a.doctor.id = :doctorId " +
             "AND LOWER(COALESCE(a.appointmentType, '')) LIKE CONCAT('%', LOWER(:typeKeyword), '%')")
     long countDistinctPatientsByDoctorIdAndTypeKeyword(@Param("doctorId") Integer doctorId, @Param("typeKeyword") String typeKeyword);
-
-    boolean existsByDoctorIdAndPatientId(Integer doctorId, Integer patientId);
 
     boolean existsByAppointmentCode(String appointmentCode);
 

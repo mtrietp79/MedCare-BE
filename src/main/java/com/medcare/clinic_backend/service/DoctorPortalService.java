@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.service;
 
+import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.dto.DoctorResponse;
 import com.medcare.clinic_backend.dto.doctor.*;
 import com.medcare.clinic_backend.entity.*;
@@ -30,12 +31,12 @@ public class DoctorPortalService {
     private static final String STATUS_COMPLETED = "COMPLETED";
     private static final String STATUS_CANCELLED = "CANCELLED";
 
-    private static final String DISPLAY_STATUS_PENDING = "Chá» khÃ¡m";
-    private static final String DISPLAY_STATUS_COMPLETED = "ÄÃ£ khÃ¡m";
-    private static final String DISPLAY_STATUS_CANCELLED = "Há»§y lá»‹ch";
+    private static final String DISPLAY_STATUS_PENDING = "Cho kham";
+    private static final String DISPLAY_STATUS_COMPLETED = "Da kham";
+    private static final String DISPLAY_STATUS_CANCELLED = "Huy lich";
 
-    private static final String TYPE_NEW_EXAM = "KhÃ¡m bá»‡nh";
-    private static final String TYPE_FOLLOW_UP = "TÃ¡i khÃ¡m";
+    private static final String TYPE_NEW_EXAM = "Kh\u00e1m b\u1ec7nh";
+    private static final String TYPE_FOLLOW_UP = "T\u00e1i kh\u00e1m";
 
     @Autowired
     private DoctorRepository doctorRepository;
@@ -68,6 +69,9 @@ public class DoctorPortalService {
     private InvoiceService invoiceService;
 
     @Autowired
+    private InvoiceRepository invoiceRepository;
+
+    @Autowired
     private DoctorService doctorService;
 
     @Autowired
@@ -75,6 +79,9 @@ public class DoctorPortalService {
 
     @Autowired
     private DoctorScheduleRepository doctorScheduleRepository;
+
+    @Autowired
+    private PatientRepository patientRepository;
 
     private static final String PAYMENT_STATUS_UNPAID = "UNPAID";
     private static final String PAYMENT_STATUS_PAID = "PAID";
@@ -148,8 +155,8 @@ public class DoctorPortalService {
 
     public DoctorAppointmentDetailResponse getAppointmentDetail(String username, Integer appointmentId) {
         Doctor doctor = getDoctorByUsername(username);
-        Appointment appointment = appointmentRepository.findByIdAndDoctorId(appointmentId, doctor.getId())
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen."));
+        Appointment appointment = findAppointmentForCurrentDoctorOrThrow(appointmentId, doctor);
+        validateAppointmentBelongsToCurrentDoctor(appointment, doctor);
 
         Patient patient = appointment.getPatient();
         Doctor appointmentDoctor = appointment.getDoctor();
@@ -158,6 +165,7 @@ public class DoctorPortalService {
 
         return new DoctorAppointmentDetailResponse(
                 appointment.getId(),
+                appointment.getAppointmentCode(),
                 new DoctorAppointmentDetailResponse.PatientInfo(
                         patient == null ? null : patient.getId(),
                         patient == null ? null : patient.getFullName(),
@@ -189,7 +197,8 @@ public class DoctorPortalService {
                 resolveAppointmentSymptomsForDetail(appointment),
                 resolveFollowUpNote(appointment),
                 resolveParentAppointmentId(appointment),
-                isFollowUpAppointment(appointment)
+                isFollowUpAppointment(appointment),
+                canDoctorExamine(appointment)
         );
     }
 
@@ -200,26 +209,34 @@ public class DoctorPortalService {
             CompleteAppointmentRequest request
     ) {
         Doctor doctor = getDoctorByUsername(username);
-        Appointment appointment = appointmentRepository.findByIdAndDoctorId(appointmentId, doctor.getId())
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen."));
+        Appointment appointment = findAppointmentForCurrentDoctorOrThrow(appointmentId, doctor);
 
         if (request == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Du lieu kham benh khong hop le.");
         }
+        validateAppointmentBelongsToCurrentDoctor(appointment, doctor);
         if (isCancelledForDoctorFlow(appointment)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "KhÃ´ng thá»ƒ khÃ¡m lá»‹ch háº¹n Ä‘Ã£ bá»‹ há»§y.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the kham lich hen da bi huy.");
         }
         if (isCompletedForDoctorFlow(appointment) || medicalRecordRepository.existsByAppointmentId(appointment.getId())) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich hen da duoc hoan tat, khong the complete lai.");
         }
+        if (appointment.getPatient() == null || appointment.getPatient().getId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich hen khong co thong tin benh nhan hop le.");
+        }
 
-        String appointmentType = resolveDisplayType(appointment.getAppointmentType());
+        FollowUpRequestPayload followUpPayload = null;
+        if (shouldCreateFollowUpFromCompleteRequest(request)) {
+            followUpPayload = validateCreateFollowUpRequest(toCreateFollowUpRequest(request));
+        }
+
+        String appointmentType = resolveDisplayType(appointment);
         appointment.setAppointmentType(appointmentType);
         String requestSymptoms = trimToNull(request.getSymptoms());
         if (requestSymptoms != null) {
             appointment.setSymptoms(requestSymptoms);
         }
-        appointment.setConsultationFee(resolveConsultationFeeByType(appointmentType, doctor));
+        appointment.setConsultationFee(resolveConsultationFeeByType(appointmentType, appointment.getDoctor()));
         appointmentRepository.save(appointment);
 
         MedicalRecord record = new MedicalRecord();
@@ -251,19 +268,16 @@ public class DoctorPortalService {
         appointmentRepository.save(appointment);
 
         CompleteAppointmentResponse.FollowUpAppointmentInfo followUpAppointmentInfo = null;
-        CompleteAppointmentRequest.FollowUp followUp = request.getFollowUp();
-        if (followUp != null && Boolean.TRUE.equals(followUp.getNeedFollowUp())) {
-            LocalDate followUpDate = parseFlexibleDate(followUp.getFollowUpDate(), "ngay tai kham");
-            LocalTime followUpTime = parseFlexibleTime(followUp.getFollowUpTime(), "gio tai kham");
+        if (followUpPayload != null) {
             Appointment followUpAppointment = createFollowUpAppointment(
                     appointment,
-                    followUpDate,
-                    followUpTime,
-                    followUp.getNote()
+                    followUpPayload.followUpDate(),
+                    followUpPayload.followUpTime(),
+                    followUpPayload.note()
             );
             followUpAppointmentInfo = toFollowUpAppointmentInfo(followUpAppointment);
             savedRecord.setFollowUpAppointment(followUpAppointment);
-            medicalRecordRepository.save(savedRecord);
+            medicalRecordRepository.saveAndFlush(savedRecord);
         }
 
         CompleteAppointmentResponse.InvoiceInfo invoiceInfo = toCompleteInvoiceInfo(savedInvoice);
@@ -274,6 +288,7 @@ public class DoctorPortalService {
         return new CompleteAppointmentResponse(
                 message,
                 appointment.getId(),
+                appointment.getAppointmentCode(),
                 appointmentType,
                 resolveDisplayStatus(appointment.getStatus()),
                 invoiceInfo,
@@ -496,8 +511,9 @@ public class DoctorPortalService {
         if (record == null) {
             return false;
         }
-        if (record.getAppointment() != null) {
-            return isFollowUpAppointment(record.getAppointment());
+        Appointment appointment = resolveSourceAppointment(record);
+        if (appointment != null) {
+            return isFollowUpAppointment(appointment);
         }
         return isFollowUpType(record.getType());
     }
@@ -526,7 +542,17 @@ public class DoctorPortalService {
                 .findByPatientIdAndDoctorIdOrderByExaminationDateDesc(patientId, doctor.getId());
 
         if (records.isEmpty()) {
-            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay benh an cua benh nhan voi bac si hien tai.");
+            if (!appointmentRepository.existsByDoctorIdAndPatientId(doctor.getId(), patientId)) {
+                throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay benh nhan cua bac si hien tai.");
+            }
+
+            Patient patient = patientRepository.findById(patientId)
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay benh nhan."));
+
+            return new DoctorPatientMedicalRecordsResponse(
+                    toPatientProfile(patient),
+                    List.of()
+            );
         }
 
         Patient patient = records.get(0).getPatient();
@@ -559,10 +585,12 @@ public class DoctorPortalService {
                     ))
                     .collect(Collectors.toList());
 
-            Appointment appointment = record.getAppointment();
+            Appointment appointment = resolveSourceAppointment(record);
+            Invoice recordInvoice = findInvoiceByRecordId(record.getId());
             recordItems.add(new DoctorPatientMedicalRecordsResponse.RecordItem(
                     record.getId(),
                     appointment == null ? null : appointment.getId(),
+                    appointment == null ? null : appointment.getAppointmentCode(),
                     resolveRecordCreatedAt(record),
                     record.getExaminationDate(),
                     appointment == null ? "Kh\u00e1m b\u1ec7nh" : resolveDisplayType(appointment),
@@ -572,7 +600,8 @@ public class DoctorPortalService {
                     record.getDoctorAdvice(),
                     medicines,
                     services,
-                    toDoctorFollowUpAppointmentInfo(record.getFollowUpAppointment())
+                    toDoctorRecordInvoiceInfo(recordInvoice),
+                    toDoctorFollowUpAppointmentInfo(resolveFollowUpAppointment(record))
             ));
         }
 
@@ -582,16 +611,7 @@ public class DoctorPortalService {
         ));
 
         return new DoctorPatientMedicalRecordsResponse(
-                new DoctorPatientMedicalRecordsResponse.PatientProfile(
-                        patient.getId(),
-                        patient.getFullName(),
-                        patient.getPhone(),
-                        patient.getEmail(),
-                        patient.getGender(),
-                        patient.getDateOfBirth(),
-                        patient.getAddress(),
-                        patient.getAvatarUrl()
-                ),
+                toPatientProfile(patient),
                 recordItems
         );
     }
@@ -607,14 +627,15 @@ public class DoctorPortalService {
             throw buildFollowUpValidationException("Benh an nay khong thuoc bac si hien tai.");
         }
 
-        Appointment sourceAppointment = record.getAppointment();
+        Appointment sourceAppointment = resolveSourceAppointment(record);
         if (sourceAppointment == null) {
             throw buildFollowUpValidationException("Benh an khong hop le de tao lich tai kham.");
         }
         if (sourceAppointment.getId() == null) {
             throw buildFollowUpValidationException("Benh an khong hop le de tao lich tai kham.");
         }
-        if (record.getFollowUpAppointment() != null || appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())) {
+        if (resolveFollowUpAppointment(record) != null
+                || appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())) {
             throw buildFollowUpValidationException("Benh an nay da ton tai lich tai kham.");
         }
 
@@ -626,7 +647,7 @@ public class DoctorPortalService {
                 payload.note()
         );
         record.setFollowUpAppointment(followUp);
-        medicalRecordRepository.save(record);
+        medicalRecordRepository.saveAndFlush(record);
 
         return new CreateFollowUpResponse(
                 followUp.getId(),
@@ -728,6 +749,45 @@ public class DoctorPortalService {
                         resolveParentAppointmentId(appointment)
                 ))
                 .collect(Collectors.toList());
+    }
+
+    public List<SlotAvailabilityDto> getFollowUpSlots(String username, LocalDate date) {
+        Doctor doctor = getDoctorByUsername(username);
+        if (date == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu ngay can kiem tra slot tai kham.");
+        }
+
+        LocalDateTime serverNow = LocalDateTime.now();
+        boolean hasConfiguredSchedule = doctorScheduleRepository.countByDoctorId(doctor.getId()) > 0;
+        Set<String> availableShifts = doctorScheduleRepository.findByDoctorIdAndWorkDate(doctor.getId(), date).stream()
+                .map(DoctorSchedule::getShift)
+                .map(this::normalizeScheduleShift)
+                .collect(Collectors.toSet());
+
+        List<SlotAvailabilityDto> result = new ArrayList<>();
+        for (SlotRule slotRule : buildFollowUpSlotRules(date)) {
+            long bookedPatients = appointmentRepository.countByDoctorInSlot(doctor.getId(), slotRule.start(), slotRule.end());
+            boolean full = bookedPatients >= slotRule.maxPatients();
+            String disabledReason = resolveFollowUpSlotDisabledReason(
+                    slotRule,
+                    serverNow,
+                    hasConfiguredSchedule,
+                    availableShifts,
+                    full
+            );
+
+            result.add(new SlotAvailabilityDto(
+                    slotRule.start(),
+                    slotRule.end(),
+                    slotRule.shift(),
+                    slotRule.maxPatients(),
+                    bookedPatients,
+                    full,
+                    disabledReason != null,
+                    disabledReason
+            ));
+        }
+        return result;
     }
 
     public DoctorProfileResponse getProfile(String username) {
@@ -878,28 +938,25 @@ public class DoctorPortalService {
             throw buildFollowUpValidationException("Da ton tai lich tai kham cho benh an nay.");
         }
 
-        if (followUpDate.isBefore(LocalDate.now())) {
-            throw buildFollowUpValidationException(
-                    "Ngay tai kham khong duoc o qua khu.",
-                    Map.of("followUpDate", "Ngay tai kham khong duoc o qua khu.")
-            );
-        }
-        SlotRule slotRule = resolveFollowUpSlotRule(followUpDate, followUpTime);
-        LocalDateTime followUpDateTime = slotRule.start();
+        LocalDateTime followUpDateTime = LocalDateTime.of(followUpDate, followUpTime)
+                .withSecond(0)
+                .withNano(0);
         if (followUpDateTime.isBefore(LocalDateTime.now())) {
             throw buildFollowUpValidationException(
-                    "Thoi gian tai kham khong duoc o qua khu.",
-                    Map.of("followUpTime", "Thoi gian tai kham khong duoc o qua khu.")
+                "Thoi gian tai kham khong duoc o qua khu.",
+                Map.of("followUpTime", "Thoi gian tai kham khong duoc o qua khu.")
             );
         }
+        validateSourceAppointmentContext(sourceAppointment);
         Integer doctorId = sourceAppointment.getDoctor() == null ? null : sourceAppointment.getDoctor().getId();
-        validateDoctorScheduleForFollowUp(doctorId, slotRule);
-        validateDoctorAvailabilityForFollowUp(doctorId, slotRule);
+        validateDoctorDateTimeAvailableForFollowUp(doctorId, followUpDateTime);
+        Specialty followUpSpecialty = resolveFollowUpSpecialty(sourceAppointment);
+        String normalizedNote = trimToNull(note);
 
         Appointment followUp = new Appointment();
         followUp.setPatient(sourceAppointment.getPatient());
         followUp.setDoctor(sourceAppointment.getDoctor());
-        followUp.setSpecialty(sourceAppointment.getSpecialty());
+        followUp.setSpecialty(followUpSpecialty);
         followUp.setMedicalService(null);
         followUp.setServicePackage(null);
         followUp.setParentAppointment(sourceAppointment);
@@ -907,16 +964,22 @@ public class DoctorPortalService {
         followUp.setAppointmentType("T\u00e1i kh\u00e1m");
         followUp.setStatus(STATUS_PENDING);
         followUp.setPaymentStatus(PAYMENT_STATUS_UNPAID);
-        followUp.setFollowUpNote(trimToNull(note));
-        followUp.setNotes(null);
-        followUp.setSymptoms(resolveSeedSymptomsForFollowUp(sourceAppointment));
+        followUp.setFollowUpNote(normalizedNote);
+        followUp.setNotes(normalizedNote);
+        followUp.setSymptoms(null);
         followUp.setConsultationFee(resolveConsultationFeeByType("T\u00e1i kh\u00e1m", sourceAppointment.getDoctor()));
         followUp.setAppointmentCode(generateAppointmentCode());
-        return appointmentRepository.save(followUp);
+        Appointment savedFollowUp = appointmentRepository.saveAndFlush(followUp);
+        return savedFollowUp == null ? followUp : savedFollowUp;
     }
 
     private Double resolveConsultationFeeByType(String appointmentType, Doctor doctor) {
         BigDecimal doctorPrice = doctor == null ? null : doctor.getPrice();
+        if (doctorPrice == null && doctor != null && doctor.getId() != null) {
+            doctorPrice = doctorRepository.findById(doctor.getId())
+                    .map(Doctor::getPrice)
+                    .orElse(null);
+        }
         if (doctorPrice == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Bac si chua duoc cau hinh phi kham.");
         }
@@ -946,10 +1009,7 @@ public class DoctorPortalService {
     }
 
     private Integer resolveParentAppointmentId(Appointment appointment) {
-        if (appointment == null || appointment.getParentAppointment() == null) {
-            return null;
-        }
-        return appointment.getParentAppointment().getId();
+        return appointment == null ? null : appointment.getParentAppointmentId();
     }
 
     private String resolveTypeCode(Appointment appointment) {
@@ -1003,6 +1063,90 @@ public class DoctorPortalService {
         return trimToNull(sourceAppointment.getSymptoms());
     }
 
+    private boolean shouldCreateFollowUpFromCompleteRequest(CompleteAppointmentRequest request) {
+        if (request == null) {
+            return false;
+        }
+
+        CompleteAppointmentRequest.FollowUp followUp = request.getFollowUp();
+        if (followUp != null && Boolean.TRUE.equals(followUp.getNeedFollowUp())) {
+            return true;
+        }
+        if (Boolean.TRUE.equals(request.getNeedFollowUp())) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private CreateFollowUpRequest toCreateFollowUpRequest(CompleteAppointmentRequest request) {
+        CreateFollowUpRequest followUpRequest = new CreateFollowUpRequest();
+        if (request == null) {
+            return followUpRequest;
+        }
+
+        CompleteAppointmentRequest.FollowUp followUp = request.getFollowUp();
+        followUpRequest.setFollowUpDate(firstNonBlank(
+                followUp == null ? null : followUp.getFollowUpDate(),
+                request.getFollowUpDate()
+        ));
+        followUpRequest.setFollowUpTime(firstNonBlank(
+                followUp == null ? null : followUp.getFollowUpTime(),
+                request.getFollowUpTime()
+        ));
+        followUpRequest.setNote(firstNonBlank(
+                followUp == null ? null : followUp.getNote(),
+                request.getFollowUpNote()
+        ));
+        return followUpRequest;
+    }
+
+    private Appointment resolveSourceAppointment(MedicalRecord record) {
+        if (record == null) {
+            return null;
+        }
+
+        Integer appointmentId = record.getAppointmentKey();
+        if (appointmentId != null) {
+            return appointmentRepository.findById(appointmentId).orElse(null);
+        }
+
+        try {
+            return record.getAppointment();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private Appointment resolveFollowUpAppointment(MedicalRecord record) {
+        if (record == null) {
+            return null;
+        }
+
+        Integer followUpAppointmentId = record.getFollowUpAppointmentKey();
+        if (followUpAppointmentId != null) {
+            return appointmentRepository.findById(followUpAppointmentId).orElse(null);
+        }
+
+        try {
+            return record.getFollowUpAppointment();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private void validateSourceAppointmentContext(Appointment sourceAppointment) {
+        if (sourceAppointment == null) {
+            throw buildFollowUpValidationException("Khong tim thay lich hen goc de tao tai kham.");
+        }
+        if (sourceAppointment.getPatient() == null || sourceAppointment.getPatient().getId() == null) {
+            throw buildFollowUpValidationException("Lich hen goc khong co thong tin benh nhan hop le.");
+        }
+        if (sourceAppointment.getDoctor() == null || sourceAppointment.getDoctor().getId() == null) {
+            throw buildFollowUpValidationException("Lich hen goc khong co thong tin bac si hop le.");
+        }
+    }
+
     private FollowUpRequestPayload validateCreateFollowUpRequest(CreateFollowUpRequest request) {
         Map<String, String> fieldErrors = new LinkedHashMap<>();
         if (request == null) {
@@ -1026,9 +1170,26 @@ public class DoctorPortalService {
             fieldErrors.put("followUpDate", "Vui long cung cap followUpDate theo dinh dang yyyy-MM-dd.");
             return null;
         }
+        List<DateTimeFormatter> acceptedFormats = List.of(
+                FOLLOW_UP_DATE_FORMATTER,
+                DateTimeFormatter.ofPattern("yyyy-M-d"),
+                DateTimeFormatter.ofPattern("d/M/yyyy"),
+                DateTimeFormatter.ofPattern("dd/MM/yyyy"),
+                DateTimeFormatter.ofPattern("d-M-yyyy"),
+                DateTimeFormatter.ofPattern("dd-MM-yyyy")
+        );
+
+        for (DateTimeFormatter formatter : acceptedFormats) {
+            try {
+                return LocalDate.parse(value, formatter);
+            } catch (DateTimeParseException ignored) {
+                // try next format
+            }
+        }
+
         try {
-            return LocalDate.parse(value, FOLLOW_UP_DATE_FORMATTER);
-        } catch (DateTimeParseException ex) {
+            return LocalDateTime.parse(value, DateTimeFormatter.ISO_LOCAL_DATE_TIME).toLocalDate();
+        } catch (DateTimeParseException ignored) {
             fieldErrors.put("followUpDate", "followUpDate phai theo dinh dang yyyy-MM-dd.");
             return null;
         }
@@ -1040,12 +1201,37 @@ public class DoctorPortalService {
             fieldErrors.put("followUpTime", "Vui long cung cap followUpTime theo dinh dang HH:mm.");
             return null;
         }
-        try {
-            return LocalTime.parse(value, FOLLOW_UP_TIME_FORMATTER);
-        } catch (DateTimeParseException ex) {
-            fieldErrors.put("followUpTime", "followUpTime phai theo dinh dang HH:mm.");
-            return null;
+        String normalized = value
+                .replace('.', ':')
+                .replaceAll("(?i)\\bSA\\b", "AM")
+                .replaceAll("(?i)\\bCH\\b", "PM")
+                .replaceAll("(?i)\\bA\\.M\\.?\\b", "AM")
+                .replaceAll("(?i)\\bP\\.M\\.?\\b", "PM")
+                .replaceAll("\\s+", " ")
+                .trim()
+                .toUpperCase(Locale.ROOT);
+
+        List<DateTimeFormatter> acceptedFormats = List.of(
+                FOLLOW_UP_TIME_FORMATTER,
+                DateTimeFormatter.ofPattern("H:mm"),
+                DateTimeFormatter.ofPattern("H:mm:ss"),
+                DateTimeFormatter.ofPattern("HH:mm:ss"),
+                DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH),
+                DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH),
+                DateTimeFormatter.ofPattern("h:mm:ss a", Locale.ENGLISH),
+                DateTimeFormatter.ofPattern("hh:mm:ss a", Locale.ENGLISH)
+        );
+
+        for (DateTimeFormatter formatter : acceptedFormats) {
+            try {
+                return LocalTime.parse(normalized, formatter);
+            } catch (DateTimeParseException ignored) {
+                // try next format
+            }
         }
+
+        fieldErrors.put("followUpTime", "followUpTime phai theo dinh dang HH:mm.");
+        return null;
     }
 
     private SlotRule resolveFollowUpSlotRule(LocalDate date, LocalTime time) {
@@ -1128,11 +1314,123 @@ public class DoctorPortalService {
         }
     }
 
+    private void validateDoctorDateTimeAvailableForFollowUp(Integer doctorId, LocalDateTime appointmentDateTime) {
+        if (doctorId == null || appointmentDateTime == null) {
+            throw buildFollowUpValidationException("Khong xac dinh duoc bac si hoac thoi gian de tao lich tai kham.");
+        }
+
+        long duplicateCount = appointmentRepository.countActiveByDoctorIdAndAppointmentDate(doctorId, appointmentDateTime);
+        if (duplicateCount > 0) {
+            throw buildFollowUpValidationException(
+                    "Bac si da co lich hen tai dung thoi diem tai kham nay.",
+                    Map.of("followUpTime", "Bac si da co lich hen tai ngay gio nay.")
+            );
+        }
+    }
+
+    private Specialty resolveFollowUpSpecialty(Appointment sourceAppointment) {
+        Specialty sourceSpecialty = sourceAppointment == null ? null : sourceAppointment.getSpecialty();
+        if (sourceSpecialty != null && sourceSpecialty.getId() != null) {
+            return sourceSpecialty;
+        }
+
+        Doctor sourceDoctor = sourceAppointment == null ? null : sourceAppointment.getDoctor();
+        Specialty doctorSpecialty = sourceDoctor == null ? null : sourceDoctor.getSpecialty();
+        if (doctorSpecialty == null && sourceDoctor != null && sourceDoctor.getId() != null) {
+            doctorSpecialty = doctorRepository.findById(sourceDoctor.getId())
+                    .map(Doctor::getSpecialty)
+                    .orElse(null);
+        }
+        if (doctorSpecialty == null || doctorSpecialty.getId() == null) {
+            throw buildFollowUpValidationException("Khong xac dinh duoc chuyen khoa de tao lich tai kham.");
+        }
+        return doctorSpecialty;
+    }
+
+    private String resolveFollowUpSlotDisabledReason(
+            SlotRule slotRule,
+            LocalDateTime serverNow,
+            boolean hasConfiguredSchedule,
+            Set<String> availableShifts,
+            boolean full
+    ) {
+        if (slotRule == null) {
+            return "INVALID_SLOT";
+        }
+        if (slotRule.start().isBefore(serverNow)) {
+            return "PAST";
+        }
+
+        String scheduleReason = resolveDoctorScheduleDisabledReason(hasConfiguredSchedule, availableShifts, slotRule.shift());
+        if (scheduleReason != null) {
+            return scheduleReason;
+        }
+        if (full) {
+            return "FULL";
+        }
+        return null;
+    }
+
+    private String resolveDoctorScheduleDisabledReason(
+            boolean hasConfiguredSchedule,
+            Set<String> availableShifts,
+            String slotShift
+    ) {
+        if (!hasConfiguredSchedule) {
+            return null;
+        }
+        if (availableShifts == null || availableShifts.isEmpty()) {
+            return "NO_SCHEDULE";
+        }
+        String normalizedShift = normalizeScheduleShift(slotShift);
+        if (availableShifts.contains("ALL_DAY") || availableShifts.contains(normalizedShift)) {
+            return null;
+        }
+        return "SHIFT_UNAVAILABLE";
+    }
+
     private String normalizeScheduleShift(String shift) {
         if (shift == null) {
             return "";
         }
         return shift.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private boolean canDoctorExamine(Appointment appointment) {
+        if (appointment == null || appointment.getId() == null) {
+            return false;
+        }
+        if (isCancelledForDoctorFlow(appointment) || isCompletedForDoctorFlow(appointment)) {
+            return false;
+        }
+        return !medicalRecordRepository.existsByAppointmentId(appointment.getId());
+    }
+
+    private Appointment findAppointmentForCurrentDoctorOrThrow(Integer appointmentId, Doctor currentDoctor) {
+        Integer doctorId = currentDoctor == null ? null : currentDoctor.getId();
+        Optional<Appointment> ownedAppointment = appointmentRepository.findByIdAndDoctorId(appointmentId, doctorId);
+        if (ownedAppointment != null && ownedAppointment.isPresent()) {
+            return ownedAppointment.get();
+        }
+
+        Appointment appointment = appointmentRepository.findById(appointmentId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen."));
+        validateAppointmentBelongsToCurrentDoctor(appointment, currentDoctor);
+        return appointment;
+    }
+
+    private void validateAppointmentBelongsToCurrentDoctor(Appointment appointment, Doctor currentDoctor) {
+        if (appointment == null || appointment.getId() == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen.");
+        }
+        Integer currentDoctorId = currentDoctor == null ? null : currentDoctor.getId();
+        Integer appointmentDoctorId = appointment.getDoctor() == null ? null : appointment.getDoctor().getId();
+        if (appointmentDoctorId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Lich hen khong co bac si, khong the hoan tat kham.");
+        }
+        if (!appointmentDoctorId.equals(currentDoctorId)) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "Lich hen nay khong thuoc bac si dang dang nhap.");
+        }
     }
 
     private BusinessException buildFollowUpValidationException(String message) {
@@ -1163,7 +1461,7 @@ public class DoctorPortalService {
         if (record.getCreatedAt() != null) {
             return record.getCreatedAt();
         }
-        Appointment appointment = record.getAppointment();
+        Appointment appointment = resolveSourceAppointment(record);
         if (appointment != null && appointment.getAppointmentDate() != null) {
             return appointment.getAppointmentDate();
         }
@@ -1198,7 +1496,7 @@ public class DoctorPortalService {
                 avatarUrl,
                 doctor.getCreatedAt() == null ? null : doctor.getCreatedAt().toLocalDate(),
                 doctor.getRating() == null ? 0 : doctor.getRating(),
-                specialtyName == null ? null : "LÃ m viá»‡c táº¡i: Khoa " + specialtyName + " MedCare"
+                specialtyName == null ? null : "LÃƒÂ m viÃ¡Â»â€¡c tÃ¡ÂºÂ¡i: Khoa " + specialtyName + " MedCare"
         );
     }
 
@@ -1220,10 +1518,13 @@ public class DoctorPortalService {
         boolean canExamine = "Ch\u01b0a kh\u00e1m".equals(displayStatus);
         return new DoctorAppointmentListItemResponse(
                 appointment.getId(),
+                appointment.getAppointmentCode(),
                 appointment.getPatient() == null ? null : appointment.getPatient().getId(),
                 appointment.getPatientName(),
                 appointment.getPatient() == null ? null : appointment.getPatient().getPhone(),
                 appointment.getPatient() == null ? null : appointment.getPatient().getEmail(),
+                appointment.getDoctorName(),
+                appointment.getSpecialtyName(),
                 dateTime == null ? null : dateTime.toLocalDate(),
                 dateTime == null ? null : dateTime.toLocalTime(),
                 formatTimeLabel(dateTime == null ? null : dateTime.toLocalTime()),
@@ -1253,20 +1554,42 @@ public class DoctorPortalService {
         );
     }
 
+    private DoctorPatientMedicalRecordsResponse.InvoiceInfo toDoctorRecordInvoiceInfo(Invoice invoice) {
+        if (invoice == null) {
+            return null;
+        }
+        return new DoctorPatientMedicalRecordsResponse.InvoiceInfo(
+                invoice.getId(),
+                invoice.getConsultationFee(),
+                invoice.getMedicineFee(),
+                invoice.getServiceFee(),
+                invoice.getTotalAmount(),
+                resolvePaymentStatusDisplay(invoice.getStatus())
+        );
+    }
+
+    private Invoice findInvoiceByRecordId(Integer recordId) {
+        if (recordId == null || invoiceRepository == null) {
+            return null;
+        }
+        return invoiceRepository.findByMedicalRecordId(recordId).orElse(null);
+    }
+
     private CompleteAppointmentResponse.FollowUpAppointmentInfo toFollowUpAppointmentInfo(Appointment followUpAppointment) {
         if (followUpAppointment == null) {
             return null;
         }
         return new CompleteAppointmentResponse.FollowUpAppointmentInfo(
                 followUpAppointment.getId(),
+                followUpAppointment.getAppointmentCode(),
                 followUpAppointment.getAppointmentDate() == null ? null : followUpAppointment.getAppointmentDate().toLocalDate(),
                 followUpAppointment.getAppointmentDate() == null ? null : followUpAppointment.getAppointmentDate().toLocalTime(),
                 resolveDisplayType(followUpAppointment),
                 resolveDisplayStatus(followUpAppointment.getStatus()),
                 followUpAppointment.getConsultationFee(),
                 resolvePaymentStatusDisplay(followUpAppointment.getPaymentStatus()),
-                resolveFollowUpNote(followUpAppointment),
-                resolveParentAppointmentId(followUpAppointment)
+                resolveParentAppointmentId(followUpAppointment),
+                resolveFollowUpNote(followUpAppointment)
         );
     }
 
@@ -1289,6 +1612,22 @@ public class DoctorPortalService {
                 resolveFollowUpNote(followUpAppointment),
                 resolveParentAppointmentId(followUpAppointment),
                 isFollowUpAppointment(followUpAppointment)
+        );
+    }
+
+    private DoctorPatientMedicalRecordsResponse.PatientProfile toPatientProfile(Patient patient) {
+        if (patient == null) {
+            return null;
+        }
+        return new DoctorPatientMedicalRecordsResponse.PatientProfile(
+                patient.getId(),
+                patient.getFullName(),
+                patient.getPhone(),
+                patient.getEmail(),
+                patient.getGender(),
+                patient.getDateOfBirth(),
+                patient.getAddress(),
+                patient.getAvatarUrl()
         );
     }
 
@@ -1484,6 +1823,19 @@ public class DoctorPortalService {
         return normalizeText(value);
     }
 
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            String normalized = trimToNull(value);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
     private LocalDate parseFlexibleDate(String rawValue, String fieldName) {
         String value = trimToNull(rawValue);
         if (value == null) {
@@ -1603,13 +1955,13 @@ public class DoctorPortalService {
 
     private String toVietnameseDayName(DayOfWeek dayOfWeek) {
         return switch (dayOfWeek) {
-            case MONDAY -> "Thá»© 2";
-            case TUESDAY -> "Thá»© 3";
-            case WEDNESDAY -> "Thá»© 4";
-            case THURSDAY -> "Thá»© 5";
-            case FRIDAY -> "Thá»© 6";
-            case SATURDAY -> "Thá»© 7";
-            case SUNDAY -> "Chá»§ Nháº­t";
+            case MONDAY -> "ThÃ¡Â»Â© 2";
+            case TUESDAY -> "ThÃ¡Â»Â© 3";
+            case WEDNESDAY -> "ThÃ¡Â»Â© 4";
+            case THURSDAY -> "ThÃ¡Â»Â© 5";
+            case FRIDAY -> "ThÃ¡Â»Â© 6";
+            case SATURDAY -> "ThÃ¡Â»Â© 7";
+            case SUNDAY -> "ChÃ¡Â»Â§ NhÃ¡ÂºÂ­t";
         };
     }
 

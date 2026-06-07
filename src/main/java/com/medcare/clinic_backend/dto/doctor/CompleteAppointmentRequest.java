@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.dto.doctor;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Data;
 
 import java.util.List;
@@ -12,6 +13,16 @@ public class CompleteAppointmentRequest {
     private List<MedicineItem> medicineItems;
     private List<ServiceItem> serviceItems;
     private FollowUp followUp;
+    private Boolean needFollowUp;
+
+    @JsonAlias({"date", "appointmentDate"})
+    private String followUpDate;
+
+    @JsonAlias({"time", "appointmentTime"})
+    private String followUpTime;
+
+    @JsonAlias({"followUpNote", "note"})
+    private String followUpNote;
 
     @Data
     public static class MedicineItem {
@@ -30,8 +41,14 @@ public class CompleteAppointmentRequest {
     @Data
     public static class FollowUp {
         private Boolean needFollowUp;
+
+        @JsonAlias({"date", "appointmentDate"})
         private String followUpDate;
+
+        @JsonAlias({"time", "appointmentTime"})
         private String followUpTime;
+
+        @JsonAlias("followUpNote")
         private String note;
     }
 }

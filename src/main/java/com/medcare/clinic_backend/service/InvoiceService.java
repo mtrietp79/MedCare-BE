@@ -13,7 +13,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.text.Normalizer;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -125,32 +124,8 @@ public class InvoiceService {
         if (appointment == null) {
             return 0.0;
         }
-        if (!isFollowUpType(appointment.getAppointmentType()) && isAppointmentPaid(appointment.getPaymentStatus())) {
-            return 0.0;
-        }
         Double fee = appointment.getConsultationFee();
         return fee == null ? 0.0 : Math.max(fee, 0.0);
-    }
-
-    private boolean isAppointmentPaid(String paymentStatus) {
-        if (paymentStatus == null || paymentStatus.isBlank()) {
-            return false;
-        }
-        String normalized = paymentStatus.trim().toUpperCase(Locale.ROOT);
-        return "PAID".equals(normalized) || "PAID_ONLINE".equals(normalized);
-    }
-
-    private boolean isFollowUpType(String type) {
-        if (type == null || type.isBlank()) {
-            return false;
-        }
-        String folded = Normalizer.normalize(type, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}+", "")
-                .toLowerCase(Locale.ROOT)
-                .replace('\u0111', 'd')
-                .replace('\u0110', 'D')
-                .replace(" ", "");
-        return folded.contains("taikham");
     }
 
     private String resolveInvoiceStatus(String currentStatus) {

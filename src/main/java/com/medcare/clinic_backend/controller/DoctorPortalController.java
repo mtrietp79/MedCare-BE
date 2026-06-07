@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.controller;
 
+import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.dto.doctor.*;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.service.DoctorPortalService;
@@ -98,7 +99,7 @@ public class DoctorPortalController {
         return doctorPortalService.getMedicalRecordPatients(getCurrentUsername(authentication), keyword);
     }
 
-    @GetMapping("/medical-records/patients/{patientId}")
+    @GetMapping({"/medical-records/{patientId:\\d+}", "/medical-records/patients/{patientId:\\d+}"})
     public DoctorPatientMedicalRecordsResponse getPatientMedicalRecords(
             @PathVariable Integer patientId,
             Authentication authentication
@@ -132,6 +133,15 @@ public class DoctorPortalController {
     ) {
         LocalDate parsedDate = parseRequiredDate(date, "date");
         return doctorPortalService.getDaySchedule(getCurrentUsername(authentication), parsedDate, period);
+    }
+
+    @GetMapping("/follow-up-slots")
+    public List<SlotAvailabilityDto> getFollowUpSlots(
+            @RequestParam String date,
+            Authentication authentication
+    ) {
+        LocalDate parsedDate = parseRequiredDate(date, "date");
+        return doctorPortalService.getFollowUpSlots(getCurrentUsername(authentication), parsedDate);
     }
 
     @GetMapping("/profile")

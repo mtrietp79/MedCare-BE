@@ -13,6 +13,7 @@ import java.time.LocalTime;
 @AllArgsConstructor
 public class DoctorAppointmentDetailResponse {
     private Integer id;
+    private String appointmentCode;
     private PatientInfo patient;
     private DoctorInfo doctor;
     private SpecialtyInfo specialty;
@@ -29,6 +30,7 @@ public class DoctorAppointmentDetailResponse {
     private String followUpNote;
     private Integer parentAppointmentId;
     private boolean followUp;
+    private boolean canExamine;
 
     @JsonProperty("appointmentType")
     public String getAppointmentType() {
@@ -38,6 +40,11 @@ public class DoctorAppointmentDetailResponse {
     @JsonProperty("appointmentTypeCode")
     public String getAppointmentTypeCode() {
         return typeCode;
+    }
+
+    @JsonProperty("canComplete")
+    public boolean getCanComplete() {
+        return canExamine;
     }
 
     @Data

@@ -270,7 +270,7 @@ public class MedicalRecordService {
             throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "Du lieu benh an khong hop le.");
         }
 
-        Appointment appointment = record.getAppointment();
+        Appointment appointment = resolveSourceAppointment(record);
         String appointmentStatus = appointment == null ? null : appointment.getStatus();
         PatientMedicalRecordDetailResponse.AppointmentInfo appointmentInfo =
                 new PatientMedicalRecordDetailResponse.AppointmentInfo(
@@ -317,7 +317,8 @@ public class MedicalRecordService {
                 .map(this::toInvoiceInfo)
                 .orElse(null);
 
-        PatientMedicalRecordDetailResponse.FollowUpInfo followUpInfo = toFollowUpInfo(record.getFollowUpAppointment());
+        PatientMedicalRecordDetailResponse.FollowUpInfo followUpInfo =
+                toFollowUpInfo(resolveFollowUpAppointment(record));
 
         return new PatientMedicalRecordDetailResponse(
                 recordId,
@@ -423,6 +424,40 @@ public class MedicalRecordService {
                         ? followUpAppointment.getNotes()
                         : followUpAppointment.getFollowUpNote()
         );
+    }
+
+    private Appointment resolveFollowUpAppointment(MedicalRecord record) {
+        if (record == null) {
+            return null;
+        }
+
+        Integer followUpAppointmentId = record.getFollowUpAppointmentKey();
+        if (followUpAppointmentId != null) {
+            return appointmentRepository.findById(followUpAppointmentId).orElse(null);
+        }
+
+        try {
+            return record.getFollowUpAppointment();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private Appointment resolveSourceAppointment(MedicalRecord record) {
+        if (record == null) {
+            return null;
+        }
+
+        Integer appointmentId = record.getAppointmentKey();
+        if (appointmentId != null) {
+            return appointmentRepository.findById(appointmentId).orElse(null);
+        }
+
+        try {
+            return record.getAppointment();
+        } catch (RuntimeException ex) {
+            return null;
+        }
     }
 
     private Map<Integer, PatientMedicalRecordListItemResponse.InvoiceSummary> loadInvoiceSummaryByRecordId(
@@ -550,7 +585,7 @@ public class MedicalRecordService {
         if (record.getCreatedAt() != null) {
             return record.getCreatedAt();
         }
-        Appointment appointment = record.getAppointment();
+        Appointment appointment = resolveSourceAppointment(record);
         if (appointment != null && appointment.getAppointmentDate() != null) {
             return appointment.getAppointmentDate();
         }

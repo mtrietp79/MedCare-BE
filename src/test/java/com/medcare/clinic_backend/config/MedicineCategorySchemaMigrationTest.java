@@ -39,7 +39,11 @@ class MedicineCategorySchemaMigrationTest {
                 "must add medicine_category column"
         );
         assertTrue(
-                sqlStatements.stream().anyMatch(sql -> sql.contains("coalesce(nullif(btrim(medicine_category), ''), nullif(btrim(unit), ''), 'Kh\u00E1c')")),
+                sqlStatements.stream().anyMatch(sql ->
+                        sql.contains("set medicine_category = coalesce(")
+                                && sql.contains("nullif(btrim(cast(medicine_category as text)), '')")
+                                && sql.contains("nullif(btrim(cast(category as text)), '')")
+                ),
                 "must backfill medicine_category from existing values"
         );
         assertTrue(

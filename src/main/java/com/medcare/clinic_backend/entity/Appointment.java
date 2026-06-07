@@ -65,6 +65,9 @@ public class Appointment {
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private Appointment parentAppointment;
 
+    @Column(name = "parent_appointment_id", insertable = false, updatable = false)
+    private Integer parentAppointmentKey;
+
     @Column(name = "follow_up_note", columnDefinition = "TEXT")
     private String followUpNote;
 
@@ -139,6 +142,9 @@ public class Appointment {
     }
 
     public Integer getParentAppointmentId() {
+        if (parentAppointmentKey != null) {
+            return parentAppointmentKey;
+        }
         return parentAppointment == null ? null : parentAppointment.getId();
     }
 

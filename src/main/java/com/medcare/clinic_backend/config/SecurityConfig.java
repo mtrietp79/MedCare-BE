@@ -81,6 +81,7 @@ public class SecurityConfig {
 
                         // Role-based protected APIs
                         .requestMatchers("/api/admin/**").hasAuthority("ROLE_ADMIN")
+                        .requestMatchers("/api/doctor/medical-records/**").hasAuthority("ROLE_DOCTOR")
                         .requestMatchers("/api/doctor/**").hasAuthority("ROLE_DOCTOR")
                         .requestMatchers("/api/patient/**", "/api/user/**").hasAuthority("ROLE_PATIENT")
                         .requestMatchers("/api/booking/**").hasAuthority("ROLE_PATIENT")

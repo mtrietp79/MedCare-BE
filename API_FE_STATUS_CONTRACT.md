@@ -191,9 +191,57 @@ Endpoint: `GET /api/doctor/appointments/{id}`
 
 ---
 
+## 2.7a Doctor - Slot tao lich tai kham
+
+Endpoint: `GET /api/doctor/follow-up-slots?date=yyyy-MM-dd`
+
+Muc dich:
+- Day la endpoint FE doctor phai dung cho ca 2 flow:
+  - modal hoan tat kham o `/doctor/appointments`
+  - modal tao tai kham thu cong o `/doctor/medical-records`
+- KHONG dung endpoint public patient booking:
+  - `/api/appointments/doctor/{doctorId}/slots`
+  cho flow doctor follow-up nua.
+
+Disabled reason code co the gap:
+- `PAST`
+- `NO_SCHEDULE`
+- `SHIFT_UNAVAILABLE`
+- `FULL`
+
+Rule:
+- Neu `disabled = true` thi FE khong cho user bam chon slot
+- Neu `disabledReason = NO_SCHEDULE` nghia la bac si khong co lich lam viec ngay do
+- Neu `disabledReason = SHIFT_UNAVAILABLE` nghia la bac si co lich ngay do nhung khong lam viec buoi do
+
+---
+
 ## 2.8 Doctor - HoÃ n táº¥t khÃ¡m
 
 Endpoint: `POST /api/doctor/appointments/{appointmentId}/complete`
+
+Request follow-up:
+
+```json
+{
+  "followUp": {
+    "needFollowUp": true,
+    "followUpDate": "yyyy-MM-dd",
+    "followUpTime": "HH:mm",
+    "note": "string?"
+  }
+}
+```
+
+BE compatibility cho FE cu:
+- Co the gui top-level: `needFollowUp`, `followUpDate`, `followUpTime`, `followUpNote`
+- Co the gui nested aliases trong `followUp`:
+  - `date` -> `followUpDate`
+  - `appointmentDate` -> `followUpDate`
+  - `time` -> `followUpTime`
+  - `appointmentTime` -> `followUpTime`
+  - `followUpNote` -> `note`
+- BE cung nhan `dd-MM-yyyy`, `dd/MM/yyyy`, `HH:mm:ss` cho follow-up compatibility input, nhung FE nen chot `yyyy-MM-dd` + `HH:mm`
 
 | Field | Type | FE dÃ¹ng Ä‘á»ƒ |
 |---|---|---|
@@ -201,6 +249,7 @@ Endpoint: `POST /api/doctor/appointments/{appointmentId}/complete`
 | `invoice.status` | string (label) | Tráº¡ng thÃ¡i hÃ³a Ä‘Æ¡n sau khÃ¡m |
 | `followUpAppointment.status` | string (label) | Tráº¡ng thÃ¡i lá»‹ch tÃ¡i khÃ¡m |
 | `followUpAppointment.paymentStatus` | string (label) | Thanh toÃ¡n lá»‹ch tÃ¡i khÃ¡m |
+| `canExamine` (`canComplete` alias) | boolean | Cho phep/disable nut Xac nhan hoan tat kham |
 
 ---
 
@@ -224,6 +273,7 @@ Alias tam thoi BE van chap nhan:
 - `appointmentDate` -> `followUpDate`
 - `appointmentTime` -> `followUpTime`
 - `followUpNote` -> `note`
+- `dd-MM-yyyy`, `dd/MM/yyyy`, `HH:mm:ss` duoc parse de tranh vo flow cu, nhung FE nen gui `yyyy-MM-dd` + `HH:mm`
 
 Neu reject request, endpoint nay tra `400` theo format:
 

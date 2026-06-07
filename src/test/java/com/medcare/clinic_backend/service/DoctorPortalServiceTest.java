@@ -1,6 +1,9 @@
 package com.medcare.clinic_backend.service;
 
+import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
 import com.medcare.clinic_backend.dto.doctor.DoctorAppointmentDetailResponse;
+import com.medcare.clinic_backend.dto.doctor.CompleteAppointmentRequest;
+import com.medcare.clinic_backend.dto.doctor.CompleteAppointmentResponse;
 import com.medcare.clinic_backend.dto.doctor.DoctorMedicalRecordPatientItemResponse;
 import com.medcare.clinic_backend.dto.doctor.DoctorMedicalRecordsSummaryResponse;
 import com.medcare.clinic_backend.dto.doctor.DoctorPatientMedicalRecordsResponse;
@@ -10,6 +13,7 @@ import com.medcare.clinic_backend.dto.doctor.CreateFollowUpResponse;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.DoctorSchedule;
+import com.medcare.clinic_backend.entity.Invoice;
 import com.medcare.clinic_backend.entity.MedicalRecord;
 import com.medcare.clinic_backend.entity.Patient;
 import com.medcare.clinic_backend.entity.PrescriptionDetail;
@@ -20,6 +24,7 @@ import com.medcare.clinic_backend.repository.AppointmentRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
 import com.medcare.clinic_backend.repository.DoctorScheduleRepository;
 import com.medcare.clinic_backend.repository.MedicalRecordRepository;
+import com.medcare.clinic_backend.repository.PatientRepository;
 import com.medcare.clinic_backend.repository.PrescriptionDetailRepository;
 import com.medcare.clinic_backend.repository.ServiceDetailRepository;
 import org.junit.jupiter.api.Test;
@@ -27,7 +32,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -67,8 +74,100 @@ class DoctorPortalServiceTest {
     @Mock
     private ServiceDetailRepository serviceDetailRepository;
 
+    @Mock
+    private PatientRepository patientRepository;
+
+    @Mock
+    private InvoiceService invoiceService;
+
     @InjectMocks
     private DoctorPortalService doctorPortalService;
+
+    @Test
+    void createFollowUp_shouldBeTransactionalToSupportLazyLoadedMedicalRecordRelations() throws Exception {
+        Method method = DoctorPortalService.class.getMethod(
+                "createFollowUp",
+                String.class,
+                Integer.class,
+                CreateFollowUpRequest.class
+        );
+
+        assertNotNull(method.getAnnotation(Transactional.class));
+    }
+
+    @Test
+    void completeAppointment_shouldAcceptCompatibilityFollowUpFieldsAndCreateFollowUp() {
+        Doctor currentDoctor = buildDoctor(7);
+        stubCurrentDoctor(currentDoctor);
+
+        Appointment appointment = buildSourceAppointment(currentDoctor);
+        appointment.setId(401);
+        appointment.setStatus("PENDING");
+        appointment.setAppointmentDate(LocalDateTime.now().minusHours(2));
+
+        Invoice invoice = new Invoice();
+        invoice.setId(801);
+        invoice.setStatus("UNPAID");
+        invoice.setConsultationFee(200000.0);
+        invoice.setMedicineFee(0.0);
+        invoice.setServiceFee(0.0);
+        invoice.setTotalAmount(200000.0);
+
+        when(appointmentRepository.findByIdAndDoctorId(401, currentDoctor.getId())).thenReturn(Optional.of(appointment));
+        when(medicalRecordRepository.existsByAppointmentId(401)).thenReturn(false);
+        when(medicalRecordRepository.save(any(MedicalRecord.class))).thenAnswer(invocation -> {
+            MedicalRecord saved = invocation.getArgument(0);
+            if (saved.getId() == null) {
+                saved.setId(601);
+            }
+            return saved;
+        });
+        when(medicalRecordRepository.saveAndFlush(any(MedicalRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(invoiceService.createInvoiceFromRecord(any(MedicalRecord.class))).thenReturn(invoice);
+        when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
+            Appointment saved = invocation.getArgument(0);
+            if (saved.getId() == null) {
+                saved.setId(901);
+            }
+            return saved;
+        });
+
+        CompleteAppointmentResponse response = doctorPortalService.completeAppointment(
+                USERNAME,
+                401,
+                buildCompleteRequest()
+        );
+
+        assertEquals(401, response.getAppointmentId());
+        assertNotNull(response.getFollowUpAppointment());
+        assertEquals(901, response.getFollowUpAppointment().getId());
+        assertEquals(LocalDate.of(2026, 6, 14), response.getFollowUpAppointment().getAppointmentDate());
+        assertEquals(LocalTime.of(8, 0), response.getFollowUpAppointment().getAppointmentTime());
+        assertEquals("Tai kham sau 1 tuan", response.getFollowUpAppointment().getNote());
+    }
+
+    @Test
+    void getFollowUpSlots_shouldDisableShiftsOutsideDoctorSchedule() {
+        Doctor currentDoctor = buildDoctor(7);
+        stubCurrentDoctor(currentDoctor);
+
+        LocalDate followUpDate = LocalDate.now().plusDays(5);
+        when(doctorScheduleRepository.countByDoctorId(currentDoctor.getId())).thenReturn(1L);
+        when(doctorScheduleRepository.findByDoctorIdAndWorkDate(currentDoctor.getId(), followUpDate))
+                .thenReturn(List.of(buildSchedule(currentDoctor, followUpDate, "MORNING")));
+        when(appointmentRepository.countByDoctorInSlot(eq(currentDoctor.getId()), any(), any())).thenReturn(0L);
+
+        List<SlotAvailabilityDto> slots = doctorPortalService.getFollowUpSlots(USERNAME, followUpDate);
+
+        assertTrue(slots.stream().anyMatch(slot ->
+                "MORNING".equals(slot.shift()) && !slot.disabled()
+        ));
+        assertTrue(slots.stream().anyMatch(slot ->
+                "AFTERNOON".equals(slot.shift())
+                        && slot.disabled()
+                        && "SHIFT_UNAVAILABLE".equals(slot.disabledReason())
+        ));
+    }
 
     @Test
     void createFollowUp_shouldRejectWhenRecordNotFound() {
@@ -105,7 +204,7 @@ class DoctorPortalServiceTest {
     }
 
     @Test
-    void createFollowUp_shouldRejectWhenDoctorHasNoScheduleOnDate() {
+    void createFollowUp_shouldCreateWithoutCheckingDoctorSchedule() {
         Doctor currentDoctor = buildDoctor(7);
         LocalDate followUpDate = LocalDate.now().plusDays(2);
         stubCurrentDoctor(currentDoctor);
@@ -114,20 +213,24 @@ class DoctorPortalServiceTest {
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(103)).thenReturn(Optional.of(record));
         when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
-        when(doctorScheduleRepository.countByDoctorId(currentDoctor.getId())).thenReturn(1L);
-        when(doctorScheduleRepository.findByDoctorIdAndWorkDate(currentDoctor.getId(), followUpDate)).thenReturn(List.of());
+        when(appointmentRepository.countActiveByDoctorIdAndAppointmentDate(
+                currentDoctor.getId(),
+                LocalDateTime.of(followUpDate, LocalTime.of(9, 0))
+        )).thenReturn(0L);
+        when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
+            Appointment saved = invocation.getArgument(0);
+            saved.setId(503);
+            return saved;
+        });
 
-        BusinessException ex = assertThrows(
-                BusinessException.class,
-                () -> doctorPortalService.createFollowUp(
-                        USERNAME,
-                        103,
-                        buildRequest(followUpDate.toString(), "09:00")
-                )
+        CreateFollowUpResponse response = doctorPortalService.createFollowUp(
+                USERNAME,
+                103,
+                buildRequest(followUpDate.toString(), "09:00")
         );
 
-        assertEquals("Bac si khong co lich lam viec vao ngay tai kham da chon.", ex.getMessage());
-        assertEquals("Bac si khong co lich lam viec vao ngay nay.", ex.getFieldErrors().get("followUpDate"));
+        assertEquals(503, response.getId());
+        assertEquals(followUpDate, response.getAppointmentDate());
     }
 
     @Test
@@ -140,15 +243,11 @@ class DoctorPortalServiceTest {
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(1030)).thenReturn(Optional.of(record));
         when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
-        when(doctorScheduleRepository.countByDoctorId(currentDoctor.getId())).thenReturn(0L);
-        when(appointmentRepository.countByDoctorInSlot(eq(currentDoctor.getId()), any(), any())).thenReturn(0L);
-        when(appointmentRepository.save(any(Appointment.class))).thenAnswer(invocation -> {
+        when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(503);
             return saved;
         });
-        when(medicalRecordRepository.save(any(MedicalRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
         CreateFollowUpResponse response = doctorPortalService.createFollowUp(
                 USERNAME,
                 1030,
@@ -160,7 +259,7 @@ class DoctorPortalServiceTest {
     }
 
     @Test
-    void createFollowUp_shouldRejectWhenSlotIsFull() {
+    void createFollowUp_shouldRejectWhenDoctorHasActiveAppointmentAtSameDateTime() {
         Doctor currentDoctor = buildDoctor(7);
         LocalDate followUpDate = LocalDate.now().plusDays(3);
         stubCurrentDoctor(currentDoctor);
@@ -169,10 +268,10 @@ class DoctorPortalServiceTest {
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(104)).thenReturn(Optional.of(record));
         when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
-        when(doctorScheduleRepository.countByDoctorId(currentDoctor.getId())).thenReturn(1L);
-        when(doctorScheduleRepository.findByDoctorIdAndWorkDate(currentDoctor.getId(), followUpDate))
-                .thenReturn(List.of(buildSchedule(currentDoctor, followUpDate, "MORNING")));
-        when(appointmentRepository.countByDoctorInSlot(eq(currentDoctor.getId()), any(), any())).thenReturn(5L);
+        when(appointmentRepository.countActiveByDoctorIdAndAppointmentDate(
+                currentDoctor.getId(),
+                LocalDateTime.of(followUpDate, LocalTime.of(9, 0))
+        )).thenReturn(1L);
 
         BusinessException ex = assertThrows(
                 BusinessException.class,
@@ -183,9 +282,9 @@ class DoctorPortalServiceTest {
                 )
         );
 
-        assertEquals("Khung gio tai kham da full.", ex.getMessage());
+        assertEquals("Bac si da co lich hen tai dung thoi diem tai kham nay.", ex.getMessage());
         assertEquals(
-                "Khung gio nay da du so luong benh nhan toi da.",
+                "Bac si da co lich hen tai ngay gio nay.",
                 ex.getFieldErrors().get("followUpTime")
         );
     }
@@ -210,8 +309,8 @@ class DoctorPortalServiceTest {
                 )
         );
 
-        assertEquals("Ngay tai kham khong duoc o qua khu.", ex.getMessage());
-        assertEquals("Ngay tai kham khong duoc o qua khu.", ex.getFieldErrors().get("followUpDate"));
+        assertEquals("Thoi gian tai kham khong duoc o qua khu.", ex.getMessage());
+        assertEquals("Thoi gian tai kham khong duoc o qua khu.", ex.getFieldErrors().get("followUpTime"));
     }
 
     @Test
@@ -243,17 +342,11 @@ class DoctorPortalServiceTest {
         MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
         when(medicalRecordRepository.findById(107)).thenReturn(Optional.of(record));
         when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
-        when(doctorScheduleRepository.countByDoctorId(currentDoctor.getId())).thenReturn(1L);
-        when(doctorScheduleRepository.findByDoctorIdAndWorkDate(currentDoctor.getId(), followUpDate))
-                .thenReturn(List.of(buildSchedule(currentDoctor, followUpDate, "MORNING")));
-        when(appointmentRepository.countByDoctorInSlot(eq(currentDoctor.getId()), any(), any())).thenReturn(2L);
-        when(appointmentRepository.save(any(Appointment.class))).thenAnswer(invocation -> {
+        when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
             Appointment saved = invocation.getArgument(0);
             saved.setId(501);
             return saved;
         });
-        when(medicalRecordRepository.save(any(MedicalRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
         CreateFollowUpResponse response = doctorPortalService.createFollowUp(
                 USERNAME,
                 107,
@@ -267,7 +360,7 @@ class DoctorPortalServiceTest {
         assertEquals("Ch\u01b0a kh\u00e1m", response.getStatus());
         assertEquals("Ch\u01b0a thanh to\u00e1n", response.getPaymentStatus());
         assertEquals(100000.0, response.getConsultationFee());
-        verify(medicalRecordRepository).save(record);
+        verify(medicalRecordRepository).saveAndFlush(record);
     }
 
     @Test
@@ -325,6 +418,23 @@ class DoctorPortalServiceTest {
     }
 
     @Test
+    void getAppointmentDetail_shouldExposeCanExamineFlag() {
+        Doctor currentDoctor = buildDoctor(7);
+        stubCurrentDoctor(currentDoctor);
+
+        Appointment appointment = buildSourceAppointment(currentDoctor);
+        appointment.setId(21);
+        appointment.setStatus("PENDING");
+
+        when(appointmentRepository.findByIdAndDoctorId(21, currentDoctor.getId())).thenReturn(Optional.of(appointment));
+        when(medicalRecordRepository.existsByAppointmentId(21)).thenReturn(false);
+
+        DoctorAppointmentDetailResponse response = doctorPortalService.getAppointmentDetail(USERNAME, 21);
+
+        assertTrue(response.isCanExamine());
+    }
+
+    @Test
     void getPatientMedicalRecords_shouldExposeFollowUpAppointmentToHideCreateButton() {
         Doctor currentDoctor = buildDoctor(7);
         stubCurrentDoctor(currentDoctor);
@@ -367,6 +477,118 @@ class DoctorPortalServiceTest {
         assertEquals("an sang truoc 7h sang", recordItem.getFollowUpAppointment().getNote());
         assertTrue(recordItem.getFollowUpAppointment().isFollowUp());
         assertEquals(2, recordItem.getFollowUpAppointmentId());
+    }
+
+    @Test
+    void getPatientMedicalRecords_shouldResolveAppointmentFromRawKeyWhenRelationUnavailable() {
+        Doctor currentDoctor = buildDoctor(7);
+        stubCurrentDoctor(currentDoctor);
+
+        Patient patient = new Patient();
+        patient.setId(15);
+        patient.setFullName("Pham Minh Triet");
+
+        Appointment appointment = buildSourceAppointment(currentDoctor);
+        appointment.setId(301);
+        appointment.setPatient(patient);
+        appointment.setSymptoms("mat ngu nhieu dem");
+
+        MedicalRecord record = buildRecord(currentDoctor, null);
+        record.setId(701);
+        record.setPatient(patient);
+        record.setExaminationDate(LocalDate.now().minusDays(1));
+        record.setDiagnosis("roi loan than kinh");
+        record.setDoctorAdvice("theo doi them");
+        record.setAppointmentKey(301);
+
+        when(medicalRecordRepository.findByPatientIdAndDoctorIdOrderByExaminationDateDesc(patient.getId(), currentDoctor.getId()))
+                .thenReturn(List.of(record));
+        when(appointmentRepository.findById(301)).thenReturn(Optional.of(appointment));
+        when(prescriptionDetailRepository.findByMedicalRecordIdIn(List.of(701))).thenReturn(List.of());
+        when(serviceDetailRepository.findByMedicalRecordIdIn(List.of(701))).thenReturn(List.of());
+
+        DoctorPatientMedicalRecordsResponse response = doctorPortalService.getPatientMedicalRecords(USERNAME, patient.getId());
+
+        assertEquals(1, response.getRecords().size());
+        assertEquals(301, response.getRecords().get(0).getAppointmentId());
+        assertEquals("NEW_EXAM", response.getRecords().get(0).getTypeCode());
+        assertEquals("mat ngu nhieu dem", response.getRecords().get(0).getSymptoms());
+    }
+
+    @Test
+    void getPatientMedicalRecords_shouldReturnEmptyPayloadWhenDoctorOwnsPatientButHasNoRecords() {
+        Doctor currentDoctor = buildDoctor(7);
+        stubCurrentDoctor(currentDoctor);
+
+        Patient patient = new Patient();
+        patient.setId(15);
+        patient.setFullName("Pham Minh Triet");
+        patient.setPhone("0909123456");
+
+        when(medicalRecordRepository.findByPatientIdAndDoctorIdOrderByExaminationDateDesc(15, currentDoctor.getId()))
+                .thenReturn(List.of());
+        when(appointmentRepository.existsByDoctorIdAndPatientId(currentDoctor.getId(), 15)).thenReturn(true);
+        when(patientRepository.findById(15)).thenReturn(Optional.of(patient));
+
+        DoctorPatientMedicalRecordsResponse response = doctorPortalService.getPatientMedicalRecords(USERNAME, 15);
+
+        assertNotNull(response.getPatient());
+        assertEquals(15, response.getPatient().getId());
+        assertEquals("Pham Minh Triet", response.getPatient().getFullName());
+        assertNotNull(response.getRecords());
+        assertTrue(response.getRecords().isEmpty());
+    }
+
+    @Test
+    void createFollowUp_shouldIgnoreBrokenFollowUpReferenceAndCreateNewAppointment() {
+        Doctor currentDoctor = buildDoctor(7);
+        LocalDate followUpDate = LocalDate.now().plusDays(5);
+        stubCurrentDoctor(currentDoctor);
+
+        Appointment sourceAppointment = buildSourceAppointment(currentDoctor);
+        sourceAppointment.setId(901);
+
+        MedicalRecord record = buildRecord(currentDoctor, sourceAppointment);
+        record.setFollowUpAppointmentKey(999);
+
+        when(medicalRecordRepository.findById(109)).thenReturn(Optional.of(record));
+        when(appointmentRepository.findById(999)).thenReturn(Optional.empty());
+        when(appointmentRepository.existsByParentAppointmentId(sourceAppointment.getId())).thenReturn(false);
+        when(appointmentRepository.saveAndFlush(any(Appointment.class))).thenAnswer(invocation -> {
+            Appointment saved = invocation.getArgument(0);
+            saved.setId(777);
+            return saved;
+        });
+
+        CreateFollowUpResponse response = doctorPortalService.createFollowUp(
+                USERNAME,
+                109,
+                buildRequest(followUpDate.toString(), "08:00")
+        );
+
+        assertEquals(777, response.getId());
+        assertEquals(followUpDate, response.getAppointmentDate());
+        verify(medicalRecordRepository).saveAndFlush(record);
+    }
+
+    @Test
+    void createFollowUp_shouldReturnValidationErrorWhenSourceAppointmentIsBroken() {
+        Doctor currentDoctor = buildDoctor(7);
+        stubCurrentDoctor(currentDoctor);
+
+        MedicalRecord record = buildRecord(currentDoctor, null);
+        record.setAppointmentKey(901);
+
+        when(medicalRecordRepository.findById(110)).thenReturn(Optional.of(record));
+        when(appointmentRepository.findById(901)).thenReturn(Optional.empty());
+
+        BusinessException ex = assertThrows(
+                BusinessException.class,
+                () -> doctorPortalService.createFollowUp(USERNAME, 110, buildRequest("2026-06-14", "08:00"))
+        );
+
+        assertEquals("Benh an khong hop le de tao lich tai kham.", ex.getMessage());
+        assertEquals("FOLLOW_UP_VALIDATION_ERROR", ex.getCode());
     }
 
     @Test
@@ -493,6 +715,16 @@ class DoctorPortalServiceTest {
         request.setFollowUpDate(date);
         request.setFollowUpTime(time);
         request.setNote("Tai kham");
+        return request;
+    }
+
+    private CompleteAppointmentRequest buildCompleteRequest() {
+        CompleteAppointmentRequest request = new CompleteAppointmentRequest();
+        request.setDiagnosis("Cam cum");
+        request.setNeedFollowUp(true);
+        request.setFollowUpDate("14-06-2026");
+        request.setFollowUpTime("08:00:00");
+        request.setFollowUpNote("Tai kham sau 1 tuan");
         return request;
     }
 }

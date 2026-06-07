@@ -27,6 +27,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -124,5 +125,93 @@ class MedicalRecordServiceTest {
         assertEquals("H\u00f3a \u0111\u01a1n t\u00e1i kh\u00e1m", response.getInvoice().getInvoiceCategoryDisplay());
         assertEquals(LocalDateTime.of(2026, 6, 20, 11, 0), response.getInvoice().getPaymentDate());
         assertEquals("T\u00e1i kh\u00e1m", response.getAppointment().getType());
+    }
+
+    @Test
+    void getPatientRecordDetailById_shouldIgnoreBrokenFollowUpReference() {
+        Patient patient = new Patient();
+        patient.setId(15);
+        patient.setFullName("Pham Thi E");
+
+        Doctor doctor = new Doctor();
+        doctor.setId(8);
+        doctor.setFullName("BS Hoang F");
+
+        Appointment appointment = new Appointment();
+        appointment.setId(77);
+        appointment.setAppointmentCode("PKB-077");
+        appointment.setAppointmentDate(LocalDateTime.of(2026, 6, 20, 9, 0));
+        appointment.setAppointmentType("Khám bệnh");
+        appointment.setStatus("COMPLETED");
+        appointment.setPatient(patient);
+        appointment.setDoctor(doctor);
+
+        MedicalRecord record = new MedicalRecord();
+        record.setId(44);
+        record.setMedicalRecordCode("BA-044");
+        record.setCreatedAt(LocalDateTime.of(2026, 6, 20, 10, 0));
+        record.setExaminationDate(LocalDate.of(2026, 6, 20));
+        record.setDiagnosis("Tai kham theo hen");
+        record.setDoctorAdvice("Theo doi them");
+        record.setType("Khám bệnh");
+        record.setAppointment(appointment);
+        record.setPatient(patient);
+        record.setDoctor(doctor);
+        record.setFollowUpAppointmentKey(999);
+
+        when(medicalRecordRepository.findByIdAndPatientId(44, 15)).thenReturn(Optional.of(record));
+        when(appointmentRepository.findById(999)).thenReturn(Optional.empty());
+        when(prescriptionDetailRepository.findPatientMedicineRowsByRecordId(44, 15)).thenReturn(List.of());
+        when(serviceDetailRepository.findPatientServiceRowsByRecordId(44, 15)).thenReturn(List.of());
+        when(invoiceRepository.findByMedicalRecordIdAndMedicalRecordPatientId(44, 15)).thenReturn(Optional.empty());
+
+        PatientMedicalRecordDetailResponse response = medicalRecordService.getPatientRecordDetailById(44, 15);
+
+        assertNull(response.getFollowUpAppointment());
+    }
+
+    @Test
+    void getPatientRecordDetailById_shouldResolveAppointmentFromRawKeyWhenRelationUnavailable() {
+        Patient patient = new Patient();
+        patient.setId(15);
+        patient.setFullName("Pham Thi E");
+
+        Doctor doctor = new Doctor();
+        doctor.setId(8);
+        doctor.setFullName("BS Hoang F");
+
+        Appointment appointment = new Appointment();
+        appointment.setId(77);
+        appointment.setAppointmentCode("PKB-077");
+        appointment.setAppointmentDate(LocalDateTime.of(2026, 6, 20, 9, 0));
+        appointment.setAppointmentType("Khám bệnh");
+        appointment.setStatus("COMPLETED");
+        appointment.setSymptoms("mat ngu");
+        appointment.setPatient(patient);
+        appointment.setDoctor(doctor);
+
+        MedicalRecord record = new MedicalRecord();
+        record.setId(44);
+        record.setMedicalRecordCode("BA-044");
+        record.setCreatedAt(LocalDateTime.of(2026, 6, 20, 10, 0));
+        record.setExaminationDate(LocalDate.of(2026, 6, 20));
+        record.setDiagnosis("Tai kham theo hen");
+        record.setDoctorAdvice("Theo doi them");
+        record.setType("Khám bệnh");
+        record.setPatient(patient);
+        record.setDoctor(doctor);
+        record.setAppointmentKey(77);
+
+        when(medicalRecordRepository.findByIdAndPatientId(44, 15)).thenReturn(Optional.of(record));
+        when(appointmentRepository.findById(77)).thenReturn(Optional.of(appointment));
+        when(prescriptionDetailRepository.findPatientMedicineRowsByRecordId(44, 15)).thenReturn(List.of());
+        when(serviceDetailRepository.findPatientServiceRowsByRecordId(44, 15)).thenReturn(List.of());
+        when(invoiceRepository.findByMedicalRecordIdAndMedicalRecordPatientId(44, 15)).thenReturn(Optional.empty());
+
+        PatientMedicalRecordDetailResponse response = medicalRecordService.getPatientRecordDetailById(44, 15);
+
+        assertNotNull(response.getAppointment());
+        assertEquals(77, response.getAppointment().getId());
+        assertEquals("mat ngu", response.getAppointment().getSymptoms());
     }
 }

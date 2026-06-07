@@ -14,10 +14,22 @@ import java.time.LocalTime;
 public class CompleteAppointmentResponse {
     private String message;
     private Integer appointmentId;
+    private String appointmentCode;
     private String appointmentType;
     private String status;
     private InvoiceInfo invoice;
     private FollowUpAppointmentInfo followUpAppointment;
+
+    public CompleteAppointmentResponse(
+            String message,
+            Integer appointmentId,
+            String appointmentType,
+            String status,
+            InvoiceInfo invoice,
+            FollowUpAppointmentInfo followUpAppointment
+    ) {
+        this(message, appointmentId, null, appointmentType, status, invoice, followUpAppointment);
+    }
 
     // Backward-compatible fields for older FE mapping.
     @JsonProperty("invoiceId")
@@ -78,18 +90,24 @@ public class CompleteAppointmentResponse {
     @AllArgsConstructor
     public static class FollowUpAppointmentInfo {
         private Integer id;
+        private String appointmentCode;
         private LocalDate appointmentDate;
         private LocalTime appointmentTime;
         private String type;
         private String status;
         private Double consultationFee;
         private String paymentStatus;
-        private String note;
         private Integer parentAppointmentId;
+        private String followUpNote;
 
         @JsonProperty("appointmentType")
         public String getAppointmentType() {
             return type;
+        }
+
+        @JsonProperty("note")
+        public String getNote() {
+            return followUpNote;
         }
 
         @JsonProperty("typeCode")
