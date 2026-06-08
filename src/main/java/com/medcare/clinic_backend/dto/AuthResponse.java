@@ -9,6 +9,7 @@ public class AuthResponse {
     private String displayName;
     private String role;
     private Boolean profileCompleted;
+    private Boolean mustChangePassword;
 
     public AuthResponse(String accessToken) {
         this.token = accessToken;
@@ -25,6 +26,18 @@ public class AuthResponse {
     }
 
     public AuthResponse(Integer id, String accessToken, String username, String displayName, String role, Boolean profileCompleted) {
+        this(id, accessToken, username, displayName, role, profileCompleted, false);
+    }
+
+    public AuthResponse(
+            Integer id,
+            String accessToken,
+            String username,
+            String displayName,
+            String role,
+            Boolean profileCompleted,
+            Boolean mustChangePassword
+    ) {
         this.id = id;
         this.token = accessToken;
         this.accessToken = accessToken;
@@ -32,6 +45,7 @@ public class AuthResponse {
         this.displayName = displayName;
         this.role = role;
         this.profileCompleted = profileCompleted;
+        this.mustChangePassword = mustChangePassword;
     }
 
     public String getAccessToken() {
@@ -98,5 +112,13 @@ public class AuthResponse {
 
     public void setProfileCompleted(Boolean profileCompleted) {
         this.profileCompleted = profileCompleted;
+    }
+
+    public Boolean getMustChangePassword() {
+        return mustChangePassword;
+    }
+
+    public void setMustChangePassword(Boolean mustChangePassword) {
+        this.mustChangePassword = mustChangePassword;
     }
 }

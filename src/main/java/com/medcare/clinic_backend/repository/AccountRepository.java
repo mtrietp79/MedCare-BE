@@ -12,6 +12,7 @@ public interface AccountRepository extends JpaRepository<Account, Integer> {
     // Hàm cực kỳ quan trọng để Spring Security tìm user khi đăng nhập
     Optional<Account> findByUsername(String username);
 
-    // Hàm này dùng để check xem username đã bị ai đăng ký trước đó chưa
+    Optional<Account> findByResetToken(String resetToken);
+
     boolean existsByUsername(String username);
 }

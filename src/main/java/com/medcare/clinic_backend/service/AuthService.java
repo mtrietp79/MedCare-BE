@@ -9,9 +9,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.medcare.clinic_backend.exception.BusinessException;
 
-import java.time.LocalDateTime;
-import java.util.Map;
-import java.security.SecureRandom;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -19,9 +16,7 @@ import java.util.regex.Pattern;
 public class AuthService {
 
     private static final Set<String> ALLOWED_ROLES = Set.of("ROLE_PATIENT", "ROLE_DOCTOR", "ROLE_ADMIN");
-    private static final Pattern GMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9._%+-]+@gmail\\.com$");
     private static final Pattern PHONE_PATTERN = Pattern.compile("^(0|\\+84)\\d{9,10}$");
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     @Autowired
     private AccountRepository accountRepository;
@@ -31,9 +26,6 @@ public class AuthService {
 
     @Autowired
     private PatientService patientService;
-
-    @Autowired
-    private OtpDeliveryService otpDeliveryService;
 
     @Transactional
     public String register(Account account) {
@@ -56,17 +48,18 @@ public class AuthService {
         if (!ALLOWED_ROLES.contains(normalizedRole)) {
             return "Loi: Role khong hop le!";
         }
+
+        String normalizedPhone = normalizePhone(phone);
+        String normalizedEmail = normalizeEmail(email);
+
         String normalizedUsername = "ROLE_PATIENT".equals(normalizedRole)
                 ? normalizeIdentifier(account.getUsername())
                 : normalizeText(account.getUsername());
         if (normalizedUsername == null) {
-            return "Loi: Patient chi duoc dang ky bang Gmail hoac so dien thoai!";
+            return "Loi: Patient chi duoc dang ky bang email hoac so dien thoai!";
         }
-
-        String normalizedPhone = normalizePhone(phone);
-        String normalizedEmail = normalizeEmail(email);
-        if (isGmail(normalizedUsername) && normalizedEmail == null) {
-            normalizedEmail = normalizedUsername.toLowerCase();
+        if (isEmail(normalizedUsername) && normalizedEmail == null) {
+            normalizedEmail = normalizedUsername;
         }
         if (isPhone(normalizedUsername) && normalizedPhone == null) {
             normalizedPhone = normalizedUsername;
@@ -97,7 +90,7 @@ public class AuthService {
         if (rawIdentifier == null) return null;
         String trimmed = rawIdentifier.trim();
         if (trimmed.isEmpty()) return null;
-        if (isGmail(trimmed)) return trimmed.toLowerCase();
+        if (isEmail(trimmed)) return trimmed.toLowerCase();
         return trimmed;
     }
 
@@ -137,51 +130,10 @@ public class AuthService {
                 .orElse(null);
     }
 
-    @Transactional
-    public Map<String, String> processForgotPassword(String username) {
-        String normalizedUsername = resolveAccountUsernameForRecovery(username);
-        if (normalizedUsername == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Chi ho tro khoi phuc bang email hoac so dien thoai.");
-        }
-
-        Account account = accountRepository.findByUsername(normalizedUsername)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Tai khoan khong ton tai!"));
-
-        String otp = generateOtp();
-        account.setResetOtp(otp);
-        account.setOtpExpiryTime(LocalDateTime.now().plusMinutes(5));
-        accountRepository.save(account);
-
-        return otpDeliveryService.sendPasswordResetOtp(normalizedUsername, otp, isGmail(normalizedUsername));
-    }
-
-    @Transactional
-    public void resetPassword(String username, String otp, String newPassword) {
-        String normalizedUsername = resolveAccountUsernameForRecovery(username);
-        if (normalizedUsername == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Chi ho tro khoi phuc bang email hoac so dien thoai.");
-        }
-        if (otp == null || otp.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ma OTP khong duoc de trong.");
-        }
-        if (newPassword == null || newPassword.isBlank()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Mat khau moi khong duoc de trong.");
-        }
-
-        Account account = accountRepository.findByUsername(normalizedUsername)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Tai khoan khong ton tai!"));
-
-        if (account.getResetOtp() == null || !account.getResetOtp().equals(otp)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ma OTP khong hop le!");
-        }
-        if (account.getOtpExpiryTime() == null || account.getOtpExpiryTime().isBefore(LocalDateTime.now())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Ma OTP da het han!");
-        }
-
-        account.setPassword(passwordEncoder.encode(newPassword));
-        account.setResetOtp(null);
-        account.setOtpExpiryTime(null);
-        accountRepository.save(account);
+    public boolean mustChangePassword(String username) {
+        return accountRepository.findByUsername(username)
+                .map(account -> Boolean.TRUE.equals(account.getMustChangePassword()))
+                .orElse(false);
     }
 
     private Account createAccount(
@@ -197,35 +149,18 @@ public class AuthService {
         account.setUsername(username);
         account.setPassword(passwordAlreadyEncoded ? password : passwordEncoder.encode(password));
         account.setRole(normalizedRole);
+        account.setMustChangePassword(false);
+        account.setIsTestAccount(false);
+        if ("ROLE_PATIENT".equals(normalizedRole) && isEmail(username)) {
+            account.setEmailVerified(true);
+        } else {
+            account.setEmailVerified(false);
+        }
         Account savedAccount = accountRepository.save(account);
         if ("ROLE_PATIENT".equals(normalizedRole)) {
             patientService.createInitialProfileForAccount(savedAccount, fullName, phone, email);
         }
         return savedAccount;
-    }
-
-    private String resolveAccountUsernameForRecovery(String rawIdentifier) {
-        String normalized = normalizeLoginIdentifier(rawIdentifier);
-        if (normalized == null) {
-            return null;
-        }
-        if (accountRepository.findByUsername(normalized).isPresent()) {
-            return normalized;
-        }
-        if (isEmail(normalized)) {
-            Account linkedAccount = patientService.findLinkedAccountByEmail(normalized);
-            if (linkedAccount != null) {
-                return linkedAccount.getUsername();
-            }
-        }
-        if (isPhone(normalized)) {
-            Account linkedAccount = patientService.findLinkedAccountByPhone(normalized);
-            if (linkedAccount != null) {
-                return linkedAccount.getUsername();
-            }
-            return normalized;
-        }
-        return null;
     }
 
     private String normalizeRole(String role) {
@@ -238,8 +173,8 @@ public class AuthService {
         if (normalized == null) {
             return null;
         }
-        if (isGmail(normalized)) {
-            return normalized.toLowerCase();
+        if (normalized.contains("@")) {
+            return normalizeEmail(normalized);
         }
         return isPhone(normalized) ? normalized : null;
     }
@@ -261,14 +196,10 @@ public class AuthService {
             return null;
         }
         String lower = normalized.toLowerCase();
-        if (!lower.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email khong hop le.");
+        if (!isEmail(lower)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email không hợp lệ");
         }
         return lower;
-    }
-
-    private boolean isGmail(String value) {
-        return value != null && GMAIL_PATTERN.matcher(value).matches();
     }
 
     private boolean isEmail(String value) {
@@ -285,9 +216,5 @@ public class AuthService {
         }
         String normalized = value.trim();
         return normalized.isEmpty() ? null : normalized;
-    }
-
-    private String generateOtp() {
-        return String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
     }
 }

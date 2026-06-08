@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import jakarta.validation.constraints.Email;
 
 public class AuthRequest {
     @JsonAlias({"identifier", "login", "userName"})
@@ -8,6 +9,7 @@ public class AuthRequest {
     @JsonAlias({"full_name", "name"})
     private String fullName;
     @JsonAlias({"mail"})
+    @Email(message = "Email không hợp lệ")
     private String email;
     @JsonAlias({"phoneNumber", "phone_number", "mobile"})
     private String phone;

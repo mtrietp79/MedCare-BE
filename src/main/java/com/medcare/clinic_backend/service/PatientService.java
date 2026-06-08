@@ -222,7 +222,7 @@ public class PatientService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "So dien thoai da duoc su dung.");
         }
         if (email != null && patientRepository.existsByEmailIgnoreCaseAndIdNot(email, currentPatientId == null ? -1 : currentPatientId)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email da duoc su dung.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email này đã được sử dụng");
         }
         if (nationalId != null && patientRepository.existsByNationalIdAndIdNot(nationalId, currentPatientId == null ? -1 : currentPatientId)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "CCCD da duoc su dung.");
@@ -305,7 +305,7 @@ public class PatientService {
             return null;
         }
         if (!normalized.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email khong hop le.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email không hợp lệ");
         }
         return normalized.toLowerCase();
     }
@@ -369,7 +369,7 @@ public class PatientService {
 
     private void ensureBootstrapIdentifiersAvailable(String email, String phone) {
         if (email != null && patientRepository.existsByEmailIgnoreCaseAndIdNot(email, -1)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email da duoc su dung.");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Email này đã được sử dụng");
         }
         if (phone != null && patientRepository.existsByPhoneAndIdNot(phone, -1)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "So dien thoai da duoc su dung.");

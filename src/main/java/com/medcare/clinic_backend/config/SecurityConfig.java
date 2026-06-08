@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.config;
 
 import com.medcare.clinic_backend.security.JwtAuthenticationFilter;
+import com.medcare.clinic_backend.security.MustChangePasswordFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
@@ -29,6 +30,9 @@ public class SecurityConfig {
 
     @Autowired
     private JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    @Autowired
+    private MustChangePasswordFilter mustChangePasswordFilter;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -100,6 +104,7 @@ public class SecurityConfig {
                 );
 
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterAfter(mustChangePasswordFilter, JwtAuthenticationFilter.class);
         return http.build();
     }
 

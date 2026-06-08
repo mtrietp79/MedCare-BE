@@ -23,7 +23,6 @@ public class Account {
     @Column(nullable = false)
     private String role;
 
-    // --- CÁC TRƯỜNG MỚI CHO QUÊN MẬT KHẨU ---
     @JsonIgnore
     @Column(name = "reset_otp")
     private String resetOtp;
@@ -31,6 +30,31 @@ public class Account {
     @JsonIgnore
     @Column(name = "otp_expiry_time")
     private LocalDateTime otpExpiryTime;
+
+    @JsonIgnore
+    @Column(name = "reset_token")
+    private String resetToken;
+
+    @JsonIgnore
+    @Column(name = "reset_token_expiry_time")
+    private LocalDateTime resetTokenExpiryTime;
+
+    @Column(name = "must_change_password", nullable = false)
+    private Boolean mustChangePassword = false;
+
+    @Column(name = "email_verified", nullable = false)
+    private Boolean emailVerified = false;
+
+    @Column(name = "is_test_account", nullable = false)
+    private Boolean isTestAccount = false;
+
+    @JsonIgnore
+    @Column(name = "otp_last_sent_at")
+    private LocalDateTime otpLastSentAt;
+
+    @JsonIgnore
+    @Column(name = "otp_failed_attempts")
+    private Integer otpFailedAttempts = 0;
 
     public Account() {}
 
@@ -40,7 +64,6 @@ public class Account {
         this.role = role;
     }
 
-    // Getters và Setters
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
 
@@ -58,4 +81,35 @@ public class Account {
 
     public LocalDateTime getOtpExpiryTime() { return otpExpiryTime; }
     public void setOtpExpiryTime(LocalDateTime otpExpiryTime) { this.otpExpiryTime = otpExpiryTime; }
+
+    public String getResetToken() { return resetToken; }
+    public void setResetToken(String resetToken) { this.resetToken = resetToken; }
+
+    public LocalDateTime getResetTokenExpiryTime() { return resetTokenExpiryTime; }
+    public void setResetTokenExpiryTime(LocalDateTime resetTokenExpiryTime) {
+        this.resetTokenExpiryTime = resetTokenExpiryTime;
+    }
+
+    public Boolean getMustChangePassword() { return mustChangePassword; }
+    public void setMustChangePassword(Boolean mustChangePassword) { this.mustChangePassword = mustChangePassword; }
+
+    public Boolean getEmailVerified() { return emailVerified; }
+    public void setEmailVerified(Boolean emailVerified) { this.emailVerified = emailVerified; }
+
+    public Boolean getIsTestAccount() { return isTestAccount; }
+    public void setIsTestAccount(Boolean isTestAccount) { this.isTestAccount = isTestAccount; }
+
+    public LocalDateTime getOtpLastSentAt() { return otpLastSentAt; }
+    public void setOtpLastSentAt(LocalDateTime otpLastSentAt) { this.otpLastSentAt = otpLastSentAt; }
+
+    public Integer getOtpFailedAttempts() { return otpFailedAttempts; }
+    public void setOtpFailedAttempts(Integer otpFailedAttempts) { this.otpFailedAttempts = otpFailedAttempts; }
+
+    public void clearPasswordRecoveryState() {
+        this.resetOtp = null;
+        this.otpExpiryTime = null;
+        this.resetToken = null;
+        this.resetTokenExpiryTime = null;
+        this.otpFailedAttempts = 0;
+    }
 }

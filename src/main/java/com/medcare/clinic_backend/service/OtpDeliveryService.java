@@ -39,7 +39,7 @@ public class OtpDeliveryService {
         if (emailChannel) {
             sendEmailOtp(destination, otp);
             return Map.of(
-                    "message", "OTP da duoc gui den Gmail cua ban.",
+                    "message", "OTP đã được gửi đến email của bạn.",
                     "channel", "EMAIL"
             );
         }
@@ -66,7 +66,7 @@ public class OtpDeliveryService {
         }
 
         return Map.of(
-                "message", "He thong chua cau hinh SMS. Vui long dung Gmail de khoi phuc mat khau.",
+                "message", "Hệ thống chưa cấu hình SMS. Vui lòng dùng email để khôi phục mật khẩu.",
                 "channel", "SMS_UNAVAILABLE"
         );
     }
