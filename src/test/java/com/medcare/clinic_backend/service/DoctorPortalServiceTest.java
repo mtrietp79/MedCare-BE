@@ -159,8 +159,8 @@ class DoctorPortalServiceTest {
 
         LocalDate followUpDate = LocalDate.now().plusDays(5);
         List<AppointmentSlotResponse> expected = List.of(
-                new AppointmentSlotResponse("08:00", 5, 5, 0, false),
-                new AppointmentSlotResponse("09:00", 5, 0, 5, true)
+                buildSlot("08:00", 5, 5, 0, false),
+                buildSlot("09:00", 5, 0, 5, true)
         );
         when(appointmentSlotService.getFollowUpSlotsForDoctor(currentDoctor.getId(), followUpDate)).thenReturn(expected);
 
@@ -178,7 +178,7 @@ class DoctorPortalServiceTest {
         appointment.setId(55);
         LocalDate followUpDate = LocalDate.of(2026, 6, 12);
         List<AppointmentSlotResponse> expected = List.of(
-                new AppointmentSlotResponse("08:00", 5, 4, 1, true)
+                buildSlot("08:00", 5, 4, 1, true)
         );
 
         when(appointmentRepository.findByIdAndDoctorId(55, currentDoctor.getId())).thenReturn(Optional.of(appointment));
@@ -200,15 +200,15 @@ class DoctorPortalServiceTest {
 
         LocalDate followUpDate = LocalDate.now().plusDays(5);
         List<AppointmentSlotResponse> expected = List.of(
-                new AppointmentSlotResponse("08:00", 5, 0, 5, true),
-                new AppointmentSlotResponse("13:00", 5, 0, 5, false)
+                buildSlot("08:00", 5, 0, 5, true),
+                buildSlot("13:00", 5, 0, 5, false)
         );
         when(appointmentSlotService.getFollowUpSlotsForDoctor(currentDoctor.getId(), followUpDate)).thenReturn(expected);
 
         List<AppointmentSlotResponse> slots = doctorPortalService.getFollowUpSlots(USERNAME, followUpDate);
 
-        assertTrue(slots.stream().anyMatch(slot -> "08:00".equals(slot.time()) && slot.available()));
-        assertTrue(slots.stream().anyMatch(slot -> "13:00".equals(slot.time()) && !slot.available()));
+        assertTrue(slots.stream().anyMatch(slot -> "08:00".equals(slot.getTime()) && slot.isAvailable()));
+        assertTrue(slots.stream().anyMatch(slot -> "13:00".equals(slot.getTime()) && !slot.isAvailable()));
     }
 
     @Test
@@ -689,6 +689,30 @@ class DoctorPortalServiceTest {
         assertEquals(2, patient.getTotalVisitCount());
         assertEquals(2, patient.getVisitCount());
         assertEquals(expectedLatestVisitDate, patient.getLatestVisitDate());
+    }
+
+    private AppointmentSlotResponse buildSlot(
+            String time,
+            int totalSlots,
+            long bookedSlots,
+            long remainingSlots,
+            boolean available
+    ) {
+        LocalDate date = LocalDate.now().plusDays(5);
+        LocalDateTime start = date.atTime(LocalTime.parse(time));
+        LocalDateTime end = start.plusMinutes(time.endsWith(":30") ? 30 : 60);
+        String shift = start.getHour() < 12 ? "morning" : "afternoon";
+        return new AppointmentSlotResponse(
+                time,
+                start,
+                end,
+                shift,
+                totalSlots,
+                bookedSlots,
+                remainingSlots,
+                available,
+                available ? null : "FULL"
+        );
     }
 
     private void stubSuccessfulFollowUpSlotValidation(Doctor doctor, LocalDate followUpDate, LocalTime followUpTime) {

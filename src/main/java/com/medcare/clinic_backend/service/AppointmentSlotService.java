@@ -47,15 +47,29 @@ public class AppointmentSlotService {
             long remainingSlots = Math.max(0, totalSlots - bookedSlots);
             boolean available = remainingSlots > 0;
 
-            result.add(new AppointmentSlotResponse(
-                    slotRule.start().toLocalTime().format(TIME_FORMATTER),
-                    totalSlots,
-                    bookedSlots,
-                    remainingSlots,
-                    available
-            ));
+            result.add(toAppointmentSlotResponse(slotRule, bookedSlots, remainingSlots, available, available ? null : "FULL"));
         }
         return result;
+    }
+
+    private AppointmentSlotResponse toAppointmentSlotResponse(
+            SlotRule slotRule,
+            long bookedSlots,
+            long remainingSlots,
+            boolean available,
+            String disabledReason
+    ) {
+        return new AppointmentSlotResponse(
+                slotRule.start().toLocalTime().format(TIME_FORMATTER),
+                slotRule.start(),
+                slotRule.end(),
+                slotRule.shift().toLowerCase(Locale.ROOT),
+                slotRule.maxPatients(),
+                bookedSlots,
+                remainingSlots,
+                available,
+                disabledReason
+        );
     }
 
     public List<SlotAvailabilityDto> getDoctorSlotsForPatientBooking(Integer doctorId, LocalDate date) {
@@ -103,22 +117,31 @@ public class AppointmentSlotService {
     }
 
     public List<AppointmentSlotResponse> getFollowUpSlotsForDoctor(Integer doctorId, LocalDate date) {
+        if (doctorId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu doctorId.");
+        }
+        if (date == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu ngay can kiem tra slot.");
+        }
+
         LocalDateTime serverNow = LocalDateTime.now();
-        return getDoctorSlots(doctorId, date).stream()
-                .map(slot -> {
-                    LocalDateTime slotStart = LocalDateTime.of(date, java.time.LocalTime.parse(slot.time()));
-                    if (slotStart.isBefore(serverNow)) {
-                        return new AppointmentSlotResponse(
-                                slot.time(),
-                                slot.totalSlots(),
-                                slot.bookedSlots(),
-                                slot.remainingSlots(),
-                                false
-                        );
-                    }
-                    return slot;
-                })
-                .toList();
+        List<AppointmentSlotResponse> result = new ArrayList<>();
+        for (SlotRule slotRule : buildDailySlotRules(date)) {
+            long bookedSlots = countBookedSlots(doctorId, slotRule.start());
+            long remainingSlots = Math.max(0, slotRule.maxPatients() - bookedSlots);
+            String disabledReason = null;
+            boolean available = remainingSlots > 0;
+
+            if (slotRule.start().isBefore(serverNow)) {
+                available = false;
+                disabledReason = "PAST";
+            } else if (!available) {
+                disabledReason = "FULL";
+            }
+
+            result.add(toAppointmentSlotResponse(slotRule, bookedSlots, remainingSlots, available, disabledReason));
+        }
+        return result;
     }
 
     public long countBookedSlots(Integer doctorId, LocalDateTime slotDateTime) {

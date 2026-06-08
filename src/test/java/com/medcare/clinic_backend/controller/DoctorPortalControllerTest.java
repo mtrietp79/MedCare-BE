@@ -338,8 +338,8 @@ class DoctorPortalControllerTest {
     void getFollowUpSlots_shouldExposeDoctorFollowUpAvailability() throws Exception {
         when(doctorPortalService.getFollowUpSlots("doctor1", LocalDate.of(2026, 6, 14)))
                 .thenReturn(List.of(
-                        new AppointmentSlotResponse("08:00", 5, 1, 4, true),
-                        new AppointmentSlotResponse("14:00", 5, 0, 5, false)
+                        buildSlot("08:00", 5, 1, 4, true),
+                        buildSlot("14:00", 5, 5, 0, false)
                 ));
 
         mockMvc.perform(get("/api/doctor/follow-up-slots?date=2026-06-14")
@@ -348,8 +348,12 @@ class DoctorPortalControllerTest {
                 .andExpect(jsonPath("$[0].time").value("08:00"))
                 .andExpect(jsonPath("$[0].available").value(true))
                 .andExpect(jsonPath("$[0].remainingSlots").value(4))
+                .andExpect(jsonPath("$[0].startTime").value("2026-06-14T08:00:00"))
+                .andExpect(jsonPath("$[0].maxPatients").value(5))
+                .andExpect(jsonPath("$[0].disabled").value(false))
                 .andExpect(jsonPath("$[1].available").value(false))
-                .andExpect(jsonPath("$[1].remainingSlots").value(5));
+                .andExpect(jsonPath("$[1].disabled").value(true))
+                .andExpect(jsonPath("$[1].disabledReason").value("FULL"));
     }
 
     @Test
@@ -359,8 +363,8 @@ class DoctorPortalControllerTest {
                 12,
                 LocalDate.of(2026, 6, 12)
         )).thenReturn(List.of(
-                new AppointmentSlotResponse("08:00", 5, 5, 0, false),
-                new AppointmentSlotResponse("09:00", 5, 0, 5, true)
+                buildSlot("08:00", 5, 5, 0, false),
+                buildSlot("09:00", 5, 0, 5, true)
         ));
 
         mockMvc.perform(get("/api/doctor/appointments/12/follow-up-slots?date=2026-06-12")
@@ -370,5 +374,48 @@ class DoctorPortalControllerTest {
                 .andExpect(jsonPath("$[0].available").value(false))
                 .andExpect(jsonPath("$[1].time").value("09:00"))
                 .andExpect(jsonPath("$[1].available").value(true));
+    }
+
+    @Test
+    void getFollowUpSlotsByMedicalRecord_shouldExposeSharedSlotAvailability() throws Exception {
+        when(doctorPortalService.getFollowUpSlotsByMedicalRecordId(
+                "doctor1",
+                91,
+                LocalDate.of(2026, 6, 11)
+        )).thenReturn(List.of(
+                buildSlot("08:00", 5, 0, 5, true),
+                buildSlot("09:00", 5, 0, 5, true)
+        ));
+
+        mockMvc.perform(get("/api/doctor/medical-records/91/follow-up-slots?date=11-06-2026")
+                        .principal(new TestingAuthenticationToken("doctor1", null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].startTime").exists())
+                .andExpect(jsonPath("$[0].disabled").value(false));
+    }
+
+    private AppointmentSlotResponse buildSlot(
+            String time,
+            int totalSlots,
+            long bookedSlots,
+            long remainingSlots,
+            boolean available
+    ) {
+        LocalDate date = LocalDate.of(2026, 6, 14);
+        LocalDateTime start = date.atTime(LocalTime.parse(time));
+        LocalDateTime end = start.plusMinutes(time.endsWith(":30") ? 30 : 60);
+        String shift = start.getHour() < 12 ? "morning" : "afternoon";
+        return new AppointmentSlotResponse(
+                time,
+                start,
+                end,
+                shift,
+                totalSlots,
+                bookedSlots,
+                remainingSlots,
+                available,
+                available ? null : "FULL"
+        );
     }
 }

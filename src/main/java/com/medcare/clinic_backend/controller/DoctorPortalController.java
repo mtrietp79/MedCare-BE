@@ -116,6 +116,20 @@ public class DoctorPortalController {
         return doctorPortalService.createFollowUp(getCurrentUsername(authentication), recordId, request);
     }
 
+    @GetMapping("/medical-records/{recordId}/follow-up-slots")
+    public List<AppointmentSlotResponse> getFollowUpSlotsByMedicalRecord(
+            @PathVariable Integer recordId,
+            @RequestParam String date,
+            Authentication authentication
+    ) {
+        LocalDate parsedDate = parseRequiredDate(date, "date");
+        return doctorPortalService.getFollowUpSlotsByMedicalRecordId(
+                getCurrentUsername(authentication),
+                recordId,
+                parsedDate
+        );
+    }
+
     @GetMapping("/schedule/week")
     public DoctorWeekScheduleResponse getWeekSchedule(
             @RequestParam String startDate,
@@ -208,6 +222,8 @@ public class DoctorPortalController {
                 DateTimeFormatter.ISO_LOCAL_DATE,
                 DateTimeFormatter.ofPattern("d/M/yyyy"),
                 DateTimeFormatter.ofPattern("dd/MM/yyyy"),
+                DateTimeFormatter.ofPattern("d-M-yyyy"),
+                DateTimeFormatter.ofPattern("dd-MM-yyyy"),
                 DateTimeFormatter.ofPattern("yyyy-M-d")
         );
 
@@ -221,7 +237,7 @@ public class DoctorPortalController {
 
         throw new BusinessException(
                 HttpStatus.BAD_REQUEST,
-                "Ngay khong hop le. Dinh dang ho tro: yyyy-MM-dd hoac d/M/yyyy."
+                "Ngay khong hop le. Dinh dang ho tro: yyyy-MM-dd, dd-MM-yyyy hoac dd/MM/yyyy."
         );
     }
 }

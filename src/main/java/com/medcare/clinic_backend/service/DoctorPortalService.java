@@ -783,6 +783,27 @@ public class DoctorPortalService {
         return appointmentSlotService.getFollowUpSlotsForDoctor(doctorId, date);
     }
 
+    public List<AppointmentSlotResponse> getFollowUpSlotsByMedicalRecordId(
+            String username,
+            Integer recordId,
+            LocalDate date
+    ) {
+        if (date == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu ngay can kiem tra slot tai kham.");
+        }
+
+        Doctor doctor = getDoctorByUsername(username);
+        MedicalRecord record = medicalRecordRepository.findById(recordId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay benh an."));
+
+        if (record.getDoctor() == null || record.getDoctor().getId() == null
+                || !doctor.getId().equals(record.getDoctor().getId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "Benh an nay khong thuoc bac si hien tai.");
+        }
+
+        return appointmentSlotService.getFollowUpSlotsForDoctor(doctor.getId(), date);
+    }
+
     public DoctorProfileResponse getProfile(String username) {
         Doctor doctor = getDoctorByUsername(username);
         syncDoctorRating(doctor);

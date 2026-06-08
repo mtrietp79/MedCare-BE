@@ -1,11 +1,11 @@
 package com.medcare.clinic_backend.security;
 
-import com.medcare.clinic_backend.service.AuthService;
+import com.medcare.clinic_backend.repository.AccountRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -15,19 +15,21 @@ import java.io.IOException;
 import java.util.Set;
 
 @Component
+@RequiredArgsConstructor
 public class MustChangePasswordFilter extends OncePerRequestFilter {
 
     private static final Set<String> ALLOWED_PATHS = Set.of(
             "/api/auth/change-password",
+            "/api/auth/logout",
             "/api/auth/me",
             "/api/auth/login",
             "/api/auth/register",
+            "/api/auth/refresh-token",
             "/api/auth/forgot-password",
             "/api/auth/reset-password"
     );
 
-    @Autowired
-    private AuthService authService;
+    private final AccountRepository accountRepository;
 
     @Override
     protected void doFilterInternal(
@@ -35,15 +37,23 @@ public class MustChangePasswordFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String path = request.getRequestURI();
+        if (isAllowedPath(path, request.getMethod())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
         if (authentication != null
                 && authentication.isAuthenticated()
                 && !"anonymousUser".equals(authentication.getPrincipal())
-                && !isAllowedPath(path, request.getMethod())) {
+        ) {
             String username = authentication.getName();
-            if (authService.mustChangePassword(username)) {
+            boolean mustChangePassword = accountRepository.findByUsername(username)
+                    .map(account -> Boolean.TRUE.equals(account.getMustChangePassword()))
+                    .orElse(false);
+            if (mustChangePassword) {
                 response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                 response.setContentType("application/json;charset=UTF-8");
                 response.getWriter().write(

@@ -51,16 +51,20 @@ class AppointmentSlotServiceTest {
         List<AppointmentSlotResponse> slots = appointmentSlotService.getDoctorSlots(DOCTOR_ID, date);
 
         AppointmentSlotResponse slot730 = findSlot(slots, "07:30");
-        assertEquals(3, slot730.totalSlots());
-        assertEquals(0, slot730.bookedSlots());
-        assertEquals(3, slot730.remainingSlots());
-        assertTrue(slot730.available());
+        assertEquals(3, slot730.getTotalSlots());
+        assertEquals(0, slot730.getBookedSlots());
+        assertEquals(3, slot730.getRemainingSlots());
+        assertTrue(slot730.isAvailable());
 
         AppointmentSlotResponse slot800 = findSlot(slots, "08:00");
-        assertEquals(5, slot800.totalSlots());
-        assertEquals(4, slot800.bookedSlots());
-        assertEquals(1, slot800.remainingSlots());
-        assertTrue(slot800.available());
+        assertEquals(5, slot800.getTotalSlots());
+        assertEquals(4, slot800.getBookedSlots());
+        assertEquals(1, slot800.getRemainingSlots());
+        assertTrue(slot800.isAvailable());
+        assertEquals(5, slot800.getMaxPatients());
+        assertEquals(4, slot800.getBookedPatients());
+        assertFalse(slot800.isFull());
+        assertFalse(slot800.isDisabled());
     }
 
     @Test
@@ -78,9 +82,12 @@ class AppointmentSlotServiceTest {
         List<AppointmentSlotResponse> slots = appointmentSlotService.getDoctorSlots(DOCTOR_ID, date);
 
         AppointmentSlotResponse slot800 = findSlot(slots, "08:00");
-        assertEquals(5, slot800.bookedSlots());
-        assertEquals(0, slot800.remainingSlots());
-        assertFalse(slot800.available());
+        assertEquals(5, slot800.getBookedSlots());
+        assertEquals(0, slot800.getRemainingSlots());
+        assertFalse(slot800.isAvailable());
+        assertTrue(slot800.isFull());
+        assertTrue(slot800.isDisabled());
+        assertEquals("FULL", slot800.getDisabledReason());
     }
 
     @Test
@@ -123,8 +130,26 @@ class AppointmentSlotServiceTest {
 
     private AppointmentSlotResponse findSlot(List<AppointmentSlotResponse> slots, String time) {
         return slots.stream()
-                .filter(slot -> time.equals(slot.time()))
+                .filter(slot -> time.equals(slot.getTime()))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    private AppointmentSlotResponse buildSlot(String time, int totalSlots, long bookedSlots, long remainingSlots, boolean available) {
+        LocalDate date = LocalDate.of(2026, 6, 12);
+        LocalDateTime start = date.atTime(java.time.LocalTime.parse(time));
+        LocalDateTime end = start.plusMinutes(time.endsWith(":30") ? 30 : 60);
+        String shift = start.getHour() < 12 ? "morning" : "afternoon";
+        return new AppointmentSlotResponse(
+                time,
+                start,
+                end,
+                shift,
+                totalSlots,
+                bookedSlots,
+                remainingSlots,
+                available,
+                available ? null : "FULL"
+        );
     }
 }
