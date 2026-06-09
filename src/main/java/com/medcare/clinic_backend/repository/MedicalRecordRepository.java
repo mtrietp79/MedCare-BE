@@ -24,6 +24,15 @@ public interface MedicalRecordRepository extends JpaRepository<MedicalRecord, In
 
     long countByDoctorId(Integer doctorId);
 
+    @Query("""
+            SELECT COUNT(mr)
+            FROM MedicalRecord mr
+            WHERE mr.doctor.specialty.id = :specialtyId
+            """)
+    long countByDoctorSpecialtyId(@Param("specialtyId") Integer specialtyId);
+
+    long countByPatientId(Integer patientId);
+
     void deleteByDoctorId(Integer doctorId);
 
     boolean existsByAppointmentId(Integer appointmentId);
@@ -77,4 +86,6 @@ public interface MedicalRecordRepository extends JpaRepository<MedicalRecord, In
             @Param("appointmentId") Integer appointmentId,
             @Param("patientId") Integer patientId
     );
+
+    List<MedicalRecord> findTop5ByPatientIdOrderByExaminationDateDesc(Integer patientId);
 }

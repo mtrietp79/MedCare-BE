@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.dto.DashboardSummaryResponse;
+import com.medcare.clinic_backend.dto.invoice.InvoiceResponse;
 import com.medcare.clinic_backend.dto.MonthlyPatientResponse;
 import com.medcare.clinic_backend.dto.MonthlyRevenueResponse;
 import com.medcare.clinic_backend.dto.RecentAppointmentResponse;
@@ -60,6 +61,12 @@ public class DashboardService {
     @Autowired
     private ServicePackageBookingRepository servicePackageBookingRepository;
 
+    @Autowired
+    private FinanceService financeService;
+
+    @Autowired
+    private FinanceStatsService financeStatsService;
+
     public DashboardSummaryResponse getSummary() {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime startOfCurrentMonth = now.withDayOfMonth(1).toLocalDate().atStartOfDay();
@@ -95,8 +102,9 @@ public class DashboardService {
         long previousMonthDoctors = countDistinctDoctorsBetween(startOfPreviousMonth, startOfCurrentMonth);
         int doctorGrowth = (int) (currentMonthDoctors - previousMonthDoctors);
 
-        double monthlyRevenue = calculateMonthlyRevenue(startOfCurrentMonth, startOfNextMonth);
-        double previousMonthRevenue = calculateMonthlyRevenue(startOfPreviousMonth, startOfCurrentMonth);
+        List<InvoiceResponse> allInvoices = financeService.getInvoiceResponsesForAdmin(null, null, null);
+        double monthlyRevenue = financeStatsService.calculateRevenueBetween(allInvoices, startOfCurrentMonth, startOfNextMonth);
+        double previousMonthRevenue = financeStatsService.calculateRevenueBetween(allInvoices, startOfPreviousMonth, startOfCurrentMonth);
         double revenueGrowthPercent = calculateRevenueGrowthPercent(monthlyRevenue, previousMonthRevenue);
 
         return new DashboardSummaryResponse(
@@ -163,36 +171,10 @@ public class DashboardService {
     public List<MonthlyRevenueResponse> getMonthlyRevenue(Integer year) {
         int targetYear = year == null ? LocalDateTime.now().getYear() : year;
         List<MonthlyRevenueResponse> monthly = init12MonthRevenue();
-        Map<Integer, Double> revenueByMonth = new HashMap<>();
-
-        for (Invoice invoice : safeList(() -> invoiceRepository.findAll())) {
-            if (invoice == null || invoice.getCreatedAt() == null) {
-                continue;
-            }
-            if (invoice.getCreatedAt().getYear() != targetYear) {
-                continue;
-            }
-            if (!isPaidInvoiceStatus(invoice.getStatus())) {
-                continue;
-            }
-            int month = invoice.getCreatedAt().getMonthValue();
-            revenueByMonth.merge(month, safeDouble(invoice.getTotalAmount()), Double::sum);
-        }
-
-        for (ServicePackageBooking booking : safeList(() -> servicePackageBookingRepository.findAll())) {
-            if (booking == null) {
-                continue;
-            }
-            LocalDateTime paidTime = booking.getUpdatedAt() != null ? booking.getUpdatedAt() : booking.getCreatedAt();
-            if (paidTime == null || paidTime.getYear() != targetYear) {
-                continue;
-            }
-            if (!isPaidBooking(booking)) {
-                continue;
-            }
-            int month = paidTime.getMonthValue();
-            revenueByMonth.merge(month, safeDouble(booking.getTotalAmount()), Double::sum);
-        }
+        Map<Integer, Double> revenueByMonth = financeStatsService.calculateMonthlyRevenueByYear(
+                financeService.getInvoiceResponsesForAdmin(null, null, null),
+                targetYear
+        );
 
         for (int i = 0; i < monthly.size(); i++) {
             int month = i + 1;
@@ -360,38 +342,6 @@ public class DashboardService {
         }
     }
 
-    private double calculateMonthlyRevenue(LocalDateTime start, LocalDateTime end) {
-        double totalRevenue = 0.0;
-
-        for (Invoice invoice : safeList(() -> invoiceRepository.findAll())) {
-            if (invoice == null || invoice.getCreatedAt() == null) {
-                continue;
-            }
-            if (invoice.getCreatedAt().isBefore(start) || !invoice.getCreatedAt().isBefore(end)) {
-                continue;
-            }
-            if (!isPaidInvoiceStatus(invoice.getStatus())) {
-                continue;
-            }
-            totalRevenue += safeDouble(invoice.getTotalAmount());
-        }
-
-        for (ServicePackageBooking booking : safeList(() -> servicePackageBookingRepository.findAll())) {
-            if (booking == null) {
-                continue;
-            }
-            LocalDateTime paidTime = booking.getUpdatedAt() != null ? booking.getUpdatedAt() : booking.getCreatedAt();
-            if (paidTime == null || paidTime.isBefore(start) || !paidTime.isBefore(end)) {
-                continue;
-            }
-            if (!isPaidBooking(booking)) {
-                continue;
-            }
-            totalRevenue += safeDouble(booking.getTotalAmount());
-        }
-
-        return totalRevenue;
-    }
 
     private long countAppointmentsBetweenExcludingCancelled(
             List<Appointment> appointments,
@@ -1208,7 +1158,9 @@ public class DashboardService {
         String normalized = normalizeStatus(status);
         return "CANCELLED".equals(normalized)
                 || "CANCELED".equals(normalized)
-                || "HUY_LICH".equals(normalized);
+                || "HUY_LICH".equals(normalized)
+                || "CANCEL_REQUESTED".equals(normalized)
+                || "CANCEL_REJECTED".equals(normalized);
     }
 
     private boolean isPaidInvoiceStatus(String status) {

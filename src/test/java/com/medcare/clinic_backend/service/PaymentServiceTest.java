@@ -211,6 +211,40 @@ class PaymentServiceTest {
     }
 
     @Test
+    void buildAppointmentFrontendReturnUrl_shouldUseConfiguredFrontendPort5173() {
+        ReflectionTestUtils.setField(paymentService, "appointmentFrontendReturnUrl",
+                "http://localhost:5173/payment/vnpay-result");
+
+        String redirectUrl = paymentService.buildAppointmentFrontendReturnUrl(
+                11,
+                new PaymentReturnResult(true, "Thanh toan thanh cong", "00")
+        );
+
+        assertTrue(redirectUrl.startsWith("http://localhost:5173/payment/vnpay-result"));
+        assertTrue(redirectUrl.contains("appointmentId=11"));
+        assertTrue(redirectUrl.contains("status=SUCCESS"));
+    }
+
+    @Test
+    void buildAppointmentFrontendReturnUrl_shouldPreferRememberedFeReturnUrl() {
+        ReflectionTestUtils.setField(paymentService, "appointmentFrontendReturnUrl",
+                "http://localhost:5173/payment/vnpay-result");
+        @SuppressWarnings("unchecked")
+        Map<String, String> overrides = (Map<String, String>) ReflectionTestUtils.getField(
+                paymentService,
+                "frontendReturnUrlOverrides"
+        );
+        overrides.put("appointment:11", "http://localhost:5173/payment/vnpay-result?from=fe");
+
+        String redirectUrl = paymentService.buildAppointmentFrontendReturnUrl(
+                11,
+                new PaymentReturnResult(true, "Thanh toan thanh cong", "00")
+        );
+
+        assertTrue(redirectUrl.startsWith("http://localhost:5173/payment/vnpay-result?from=fe"));
+    }
+
+    @Test
     void processInvoiceVnpayReturn_shouldMarkPaidAndSendMail() {
         ReflectionTestUtils.setField(paymentService, "secretKey", "secret-key");
 

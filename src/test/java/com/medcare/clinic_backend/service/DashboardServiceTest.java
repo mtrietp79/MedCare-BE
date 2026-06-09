@@ -1,5 +1,6 @@
 package com.medcare.clinic_backend.service;
 
+import com.medcare.clinic_backend.dto.invoice.InvoiceResponse;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.Invoice;
@@ -20,9 +21,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.io.ByteArrayInputStream;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,6 +44,12 @@ class DashboardServiceTest {
 
     @Mock
     private ServicePackageBookingRepository servicePackageBookingRepository;
+
+    @Mock
+    private FinanceService financeService;
+
+    @Mock
+    private FinanceStatsService financeStatsService;
 
     @InjectMocks
     private DashboardService dashboardService;
@@ -69,8 +80,12 @@ class DashboardServiceTest {
         when(appointmentRepository.findAll()).thenReturn(List.of(januaryAppointment, februaryAppointment));
         when(appointmentRepository.findTop10ByOrderByAppointmentDateDesc())
                 .thenReturn(List.of(februaryAppointment, januaryAppointment));
-        when(invoiceRepository.findAll()).thenReturn(List.of(januaryInvoice, februaryInvoice));
         when(servicePackageBookingRepository.findAll()).thenReturn(List.of());
+        when(financeService.getInvoiceResponsesForAdmin(isNull(), isNull(), isNull())).thenReturn(List.of());
+        when(financeStatsService.calculateRevenueBetween(any(List.class), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(750_000.0);
+        when(financeStatsService.calculateMonthlyRevenueByYear(any(List.class), eq(2026)))
+                .thenReturn(Map.of(1, 1_500_000.0, 2, 750_000.0));
 
         byte[] workbookBytes = dashboardService.exportDashboardReport(2026);
 

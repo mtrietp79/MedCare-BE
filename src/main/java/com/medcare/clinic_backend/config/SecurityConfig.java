@@ -73,6 +73,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/doctors/*/photo").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/admin/dashboard/**", "/api/dashboard/**").permitAll()
                         .requestMatchers("/api/payment/vnpay-return").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/contact-messages").permitAll()
 
                         // Role-based protected APIs
                         .requestMatchers("/api/admin/**").hasAuthority("ROLE_ADMIN")

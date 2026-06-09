@@ -426,7 +426,7 @@ class DoctorPortalServiceTest {
 
         assertEquals(1, response.size());
         assertEquals("T\u00e1i kh\u00e1m", response.get(0).getType());
-        assertEquals("FOLLOW_UP", response.get(0).getTypeCode());
+        assertEquals("RE_EXAMINATION", response.get(0).getTypeCode());
         assertTrue(response.get(0).isFollowUp());
         assertEquals(1, response.get(0).getParentAppointmentId());
     }
@@ -450,7 +450,7 @@ class DoctorPortalServiceTest {
         DoctorAppointmentDetailResponse response = doctorPortalService.getAppointmentDetail(USERNAME, 2);
 
         assertEquals("T\u00e1i kh\u00e1m", response.getType());
-        assertEquals("FOLLOW_UP", response.getTypeCode());
+        assertEquals("RE_EXAMINATION", response.getTypeCode());
         assertTrue(response.isFollowUp());
         assertEquals("an sang truoc 7h sang", response.getFollowUpNote());
         assertEquals("mat ngu nhieu dem", response.getSymptoms());
@@ -510,11 +510,11 @@ class DoctorPortalServiceTest {
         assertEquals(1, response.getRecords().size());
         DoctorPatientMedicalRecordsResponse.RecordItem recordItem = response.getRecords().get(0);
         assertEquals("Kh\u00e1m b\u1ec7nh", recordItem.getType());
-        assertEquals("NEW_EXAM", recordItem.getTypeCode());
+        assertEquals("EXAMINATION", recordItem.getTypeCode());
         assertNotNull(recordItem.getFollowUpAppointment());
         assertEquals(2, recordItem.getFollowUpAppointment().getAppointmentId());
         assertEquals("T\u00e1i kh\u00e1m", recordItem.getFollowUpAppointment().getType());
-        assertEquals("FOLLOW_UP", recordItem.getFollowUpAppointment().getTypeCode());
+        assertEquals("RE_EXAMINATION", recordItem.getFollowUpAppointment().getTypeCode());
         assertEquals("an sang truoc 7h sang", recordItem.getFollowUpAppointment().getNote());
         assertTrue(recordItem.getFollowUpAppointment().isFollowUp());
         assertEquals(2, recordItem.getFollowUpAppointmentId());
@@ -552,7 +552,7 @@ class DoctorPortalServiceTest {
 
         assertEquals(1, response.getRecords().size());
         assertEquals(301, response.getRecords().get(0).getAppointmentId());
-        assertEquals("NEW_EXAM", response.getRecords().get(0).getTypeCode());
+        assertEquals("EXAMINATION", response.getRecords().get(0).getTypeCode());
         assertEquals("mat ngu nhieu dem", response.getRecords().get(0).getSymptoms());
     }
 

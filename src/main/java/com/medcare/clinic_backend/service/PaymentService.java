@@ -16,20 +16,26 @@ import com.medcare.clinic_backend.repository.InvoiceRepository;
 import com.medcare.clinic_backend.repository.PatientRepository;
 import com.medcare.clinic_backend.repository.ServicePackageBookingRepository;
 import com.medcare.clinic_backend.repository.TransactionLogRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class PaymentService {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
     private static final String SERVICE_PACKAGE_TXN_PREFIX = "SPB-";
     private static final String INVOICE_TXN_PREFIX = "INV-";
@@ -74,6 +80,11 @@ public class PaymentService {
 
     @Value("${vnpay.invoiceFrontendReturnUrl:}")
     private String invoiceFrontendReturnUrl;
+
+    @Value("${frontend.url:http://localhost:5173}")
+    private String frontendUrl;
+
+    private final Map<String, String> frontendReturnUrlOverrides = new ConcurrentHashMap<>();
 
     public long resolvePaymentAmount(Integer appointmentId) {
         Appointment appointment = appointmentRepository.findById(appointmentId)
@@ -152,6 +163,10 @@ public class PaymentService {
     }
 
     public String createPaymentUrl(Integer appointmentId, String ipAddress, String username) {
+        return createPaymentUrl(appointmentId, ipAddress, username, null);
+    }
+
+    public String createPaymentUrl(Integer appointmentId, String ipAddress, String username, String returnUrl) {
         assertVnpayConfiguration();
         if (appointmentId == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu appointmentId.");
@@ -183,16 +198,22 @@ public class PaymentService {
         }
 
         long amount = resolvePaymentAmount(appointmentId);
+        rememberFrontendReturnUrl(frontendReturnKey("appointment", appointmentId), returnUrl, appointmentFrontendReturnUrl);
+        String callbackUrl = withReturnParam("appointmentId", appointmentId);
         return buildPaymentUrl(
                 String.valueOf(appointmentId),
                 "Thanh toan lich hen ID: " + appointmentId,
                 amount,
-                withReturnParam("appointmentId", appointmentId),
+                callbackUrl,
                 ipAddress
         );
     }
 
     public String createInvoicePaymentUrl(Integer invoiceId, String ipAddress, String username) {
+        return createInvoicePaymentUrl(invoiceId, ipAddress, username, null);
+    }
+
+    public String createInvoicePaymentUrl(Integer invoiceId, String ipAddress, String username, String returnUrl) {
         assertVnpayConfiguration();
         if (invoiceId == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu invoiceId.");
@@ -206,6 +227,7 @@ public class PaymentService {
         }
 
         long amount = resolveInvoiceAmount(invoiceId);
+        rememberFrontendReturnUrl(frontendReturnKey("invoice", invoiceId), returnUrl, invoiceFrontendReturnUrl);
         return buildPaymentUrl(
                 invoiceTxnRef(invoiceId),
                 "Thanh toan hoa don kham benh ID: " + invoiceId,
@@ -216,6 +238,10 @@ public class PaymentService {
     }
 
     public String createServicePackagePaymentUrl(Integer bookingId, String ipAddress, String username) {
+        return createServicePackagePaymentUrl(bookingId, ipAddress, username, null);
+    }
+
+    public String createServicePackagePaymentUrl(Integer bookingId, String ipAddress, String username, String returnUrl) {
         assertVnpayConfiguration();
         if (bookingId == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Thieu bookingId.");
@@ -239,6 +265,7 @@ public class PaymentService {
 
         long amount = resolveServicePackageBookingAmount(bookingId);
         String displayCode = booking.getBookingCode() == null ? String.valueOf(bookingId) : booking.getBookingCode();
+        rememberFrontendReturnUrl(frontendReturnKey("service_package", bookingId), returnUrl, servicePackageFrontendReturnUrl);
         return buildPaymentUrl(
                 servicePackageTxnRef(bookingId),
                 "Thanh toan dat goi dich vu: " + displayCode,
@@ -427,33 +454,51 @@ public class PaymentService {
     }
 
     public String buildAppointmentFrontendReturnUrl(Integer appointmentId, PaymentReturnResult result) {
-        return buildFrontendReturnUrl(
-                appointmentFrontendReturnUrl,
+        String baseUrl = consumeFrontendReturnUrl(
+                frontendReturnKey("appointment", appointmentId),
+                appointmentFrontendReturnUrl
+        );
+        String redirectUrl = buildFrontendReturnUrl(
+                baseUrl,
                 "APPOINTMENT",
                 "appointmentId",
                 appointmentId,
                 result
         );
+        log.info("VNPay frontend redirectUrl = {}", redirectUrl);
+        return redirectUrl;
     }
 
     public String buildServicePackageFrontendReturnUrl(Integer bookingId, PaymentReturnResult result) {
-        return buildFrontendReturnUrl(
-                servicePackageFrontendReturnUrl,
+        String baseUrl = consumeFrontendReturnUrl(
+                frontendReturnKey("service_package", bookingId),
+                servicePackageFrontendReturnUrl
+        );
+        String redirectUrl = buildFrontendReturnUrl(
+                baseUrl,
                 "SERVICE_PACKAGE",
                 "bookingId",
                 bookingId,
                 result
         );
+        log.info("VNPay frontend redirectUrl = {}", redirectUrl);
+        return redirectUrl;
     }
 
     public String buildInvoiceFrontendReturnUrl(Integer invoiceId, PaymentReturnResult result) {
-        return buildFrontendReturnUrl(
-                invoiceFrontendReturnUrl,
+        String baseUrl = consumeFrontendReturnUrl(
+                frontendReturnKey("invoice", invoiceId),
+                invoiceFrontendReturnUrl
+        );
+        String redirectUrl = buildFrontendReturnUrl(
+                baseUrl,
                 "INVOICE",
                 "invoiceId",
                 invoiceId,
                 result
         );
+        log.info("VNPay frontend redirectUrl = {}", redirectUrl);
+        return redirectUrl;
     }
 
     @Transactional
@@ -722,6 +767,7 @@ public class PaymentService {
         vnpParams.put("vnp_Locale", "vn");
         vnpParams.put("vnp_ReturnUrl", callbackUrl);
         vnpParams.put("vnp_IpAddr", vnpIpAddr);
+        log.info("VNPay returnUrl = {}", callbackUrl);
 
         Calendar cld = Calendar.getInstance(TimeZone.getTimeZone("Etc/GMT+7"));
         SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMddHHmmss");
@@ -758,7 +804,69 @@ public class PaymentService {
 
         String vnpSecureHash = VNPayConfig.hmacSHA512(secretKey, hashData.toString());
         String queryUrl = query + "&vnp_SecureHash=" + vnpSecureHash;
-        return vnpPayUrl + "?" + queryUrl;
+        String paymentUrl = vnpPayUrl + "?" + queryUrl;
+        log.info("VNPay paymentUrl = {}", paymentUrl);
+        return paymentUrl;
+    }
+
+    private void rememberFrontendReturnUrl(String resourceKey, String requestedReturnUrl, String configuredReturnUrl) {
+        String resolved = resolveFrontendReturnUrl(requestedReturnUrl, configuredReturnUrl);
+        frontendReturnUrlOverrides.put(resourceKey, resolved);
+        log.info("VNPay frontendReturnUrl = {}", resolved);
+    }
+
+    private String consumeFrontendReturnUrl(String resourceKey, String configuredReturnUrl) {
+        String resolved = frontendReturnUrlOverrides.getOrDefault(resourceKey, configuredReturnUrl);
+        frontendReturnUrlOverrides.remove(resourceKey);
+        if (resolved == null || resolved.isBlank()) {
+            resolved = configuredReturnUrl;
+        }
+        return resolved;
+    }
+
+    private String resolveFrontendReturnUrl(String requestedReturnUrl, String configuredReturnUrl) {
+        String normalizedRequested = trimToNull(requestedReturnUrl);
+        if (normalizedRequested != null && isAllowedFrontendReturnUrl(normalizedRequested)) {
+            return normalizedRequested;
+        }
+        return configuredReturnUrl;
+    }
+
+    private boolean isAllowedFrontendReturnUrl(String returnUrl) {
+        try {
+            URI uri = URI.create(returnUrl);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            String path = uri.getPath();
+            if (scheme == null || host == null || path == null) {
+                return false;
+            }
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                return false;
+            }
+            if (!path.endsWith("/payment/vnpay-result")) {
+                return false;
+            }
+            if ("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)) {
+                return true;
+            }
+            URI configuredFrontend = URI.create(frontendUrl.endsWith("/") ? frontendUrl.substring(0, frontendUrl.length() - 1) : frontendUrl);
+            return host.equalsIgnoreCase(configuredFrontend.getHost());
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private String frontendReturnKey(String resourceType, Integer resourceId) {
+        return resourceType + ":" + resourceId;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String withReturnParam(String key, Integer value) {

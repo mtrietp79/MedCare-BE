@@ -42,6 +42,6 @@ public class SpecialtyController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     public void delete(@PathVariable Integer id) {
-        specialtyService.deleteSpecialty(id);
+        specialtyService.deleteSpecialtySafely(id);
     }
 }

@@ -6,6 +6,7 @@ import com.medcare.clinic_backend.dto.doctor.*;
 import com.medcare.clinic_backend.entity.*;
 import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.*;
+import com.medcare.clinic_backend.util.AppointmentTypeCatalog;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -597,7 +598,7 @@ public class DoctorPortalService {
                     resolveRecordCreatedAt(record),
                     record.getExaminationDate(),
                     appointment == null ? "Kh\u00e1m b\u1ec7nh" : resolveDisplayType(appointment),
-                    appointment == null ? "NEW_EXAM" : resolveTypeCode(appointment),
+                    appointment == null ? AppointmentTypeCatalog.CODE_EXAMINATION : resolveTypeCode(appointment),
                     appointment == null ? null : resolveAppointmentSymptomsForDetail(appointment),
                     record.getDiagnosis(),
                     record.getDoctorAdvice(),
@@ -1036,7 +1037,7 @@ public class DoctorPortalService {
     }
 
     private String resolveTypeCode(Appointment appointment) {
-        return isFollowUpAppointment(appointment) ? "FOLLOW_UP" : "NEW_EXAM";
+        return AppointmentTypeCatalog.resolve(appointment).code();
     }
 
     private String resolveFollowUpNote(Appointment appointment) {
@@ -1581,10 +1582,16 @@ public class DoctorPortalService {
         if (normalized == null) {
             return AppointmentTypeFilter.ALL;
         }
-        if (normalized.contains("khambenh")) {
+        if (normalized.contains("khambenh")
+                || normalized.contains("examination")
+                || normalized.contains("newexam")
+                || normalized.contains("checkup")) {
             return AppointmentTypeFilter.NEW_EXAM;
         }
-        if (normalized.contains("taikham")) {
+        if (normalized.contains("taikham")
+                || normalized.contains("reexamination")
+                || normalized.contains("followup")
+                || normalized.contains("revisit")) {
             return AppointmentTypeFilter.FOLLOW_UP;
         }
         throw new BusinessException(HttpStatus.BAD_REQUEST, "Loai kham loc khong hop le.");

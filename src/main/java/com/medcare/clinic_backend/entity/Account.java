@@ -23,6 +23,9 @@ public class Account {
     @Column(nullable = false)
     private String role;
 
+    @Column(name = "is_active", nullable = false)
+    private Boolean isActive = true;
+
     @JsonIgnore
     @Column(name = "reset_otp")
     private String resetOtp;
@@ -56,6 +59,9 @@ public class Account {
     @Column(name = "otp_failed_attempts")
     private Integer otpFailedAttempts = 0;
 
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
     public Account() {}
 
     public Account(String username, String password, String role) {
@@ -75,6 +81,9 @@ public class Account {
 
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
+
+    public Boolean getIsActive() { return isActive; }
+    public void setIsActive(Boolean isActive) { this.isActive = isActive; }
 
     public String getResetOtp() { return resetOtp; }
     public void setResetOtp(String resetOtp) { this.resetOtp = resetOtp; }
@@ -104,6 +113,9 @@ public class Account {
 
     public Integer getOtpFailedAttempts() { return otpFailedAttempts; }
     public void setOtpFailedAttempts(Integer otpFailedAttempts) { this.otpFailedAttempts = otpFailedAttempts; }
+
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 
     public void clearPasswordRecoveryState() {
         this.resetOtp = null;

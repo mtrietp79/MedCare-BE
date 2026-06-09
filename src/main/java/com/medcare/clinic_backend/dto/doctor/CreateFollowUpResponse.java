@@ -22,16 +22,26 @@ public class CreateFollowUpResponse {
 
     @JsonProperty("appointmentType")
     public String getAppointmentType() {
+        return "RE_EXAMINATION";
+    }
+
+    @JsonProperty("appointmentTypeLabel")
+    public String getAppointmentTypeLabel() {
         return type;
     }
 
     @JsonProperty("typeCode")
     public String getTypeCode() {
-        return "T\u00e1i kh\u00e1m".equals(type) ? "FOLLOW_UP" : "NEW_EXAM";
+        return "RE_EXAMINATION";
     }
 
     @JsonProperty("appointmentTypeCode")
     public String getAppointmentTypeCode() {
         return getTypeCode();
+    }
+
+    @JsonProperty("isReExamination")
+    public boolean getIsReExamination() {
+        return true;
     }
 }

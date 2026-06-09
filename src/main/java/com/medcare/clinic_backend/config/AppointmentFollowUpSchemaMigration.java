@@ -41,6 +41,14 @@ public class AppointmentFollowUpSchemaMigration implements ApplicationRunner {
 
         jdbcTemplate.execute("""
                 update public.appointments
+                set appointment_type = 'Tái khám'
+                where parent_appointment_id is not null
+                  and lower(coalesce(appointment_type, '')) not like '%tái%'
+                  and lower(coalesce(appointment_type, '')) not like '%tai%'
+                """);
+
+        jdbcTemplate.execute("""
+                update public.appointments
                 set payment_status = 'UNPAID'
                 where payment_status is null or btrim(payment_status) = ''
                 """);

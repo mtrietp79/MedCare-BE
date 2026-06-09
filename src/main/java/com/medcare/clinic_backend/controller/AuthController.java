@@ -9,6 +9,7 @@ import com.medcare.clinic_backend.dto.ResetPasswordRequest;
 import com.medcare.clinic_backend.dto.ResetPasswordWithTokenDto;
 import com.medcare.clinic_backend.dto.VerifyForgotPasswordOtpDto;
 import com.medcare.clinic_backend.entity.Account;
+import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.security.JwtTokenProvider;
 import com.medcare.clinic_backend.service.AuthService;
 import com.medcare.clinic_backend.service.DoctorService;
@@ -18,6 +19,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -27,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -91,9 +95,16 @@ public class AuthController {
                 loginRequest.getEmail(),
                 loginRequest.getPhone()
         ));
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(identifier, loginRequest.getPassword())
-        );
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(identifier, loginRequest.getPassword())
+            );
+        } catch (DisabledException ex) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.");
+        } catch (BadCredentialsException ex) {
+            throw ex;
+        }
         SecurityContextHolder.getContext().setAuthentication(authentication);
         String username = authentication.getName();
         String role = resolveRole(authentication, username);

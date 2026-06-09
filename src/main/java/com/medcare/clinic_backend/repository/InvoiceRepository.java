@@ -24,7 +24,19 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Integer> {
 
     Optional<Invoice> findByMedicalRecordIdAndMedicalRecordPatientId(Integer recordId, Integer patientId);
 
+    long countByMedicalRecordPatientId(Integer patientId);
+
+    @Query("""
+            SELECT COALESCE(SUM(i.totalAmount), 0)
+            FROM Invoice i
+            WHERE i.medicalRecord.patient.id = :patientId
+              AND UPPER(COALESCE(i.status, '')) IN ('PAID', 'PAID_ONLINE')
+            """)
+    Double sumPaidAmountByPatientId(@Param("patientId") Integer patientId);
+
     boolean existsByAppointmentId(Integer appointmentId);
+
+    Optional<Invoice> findFirstByAppointment_IdOrderByCreatedAtDesc(Integer appointmentId);
 
     void deleteByMedicalRecordIdIn(List<Integer> recordIds);
 

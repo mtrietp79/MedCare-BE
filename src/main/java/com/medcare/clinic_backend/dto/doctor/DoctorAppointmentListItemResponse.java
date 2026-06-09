@@ -35,12 +35,27 @@ public class DoctorAppointmentListItemResponse {
 
     @JsonProperty("appointmentType")
     public String getAppointmentType() {
+        return typeCode;
+    }
+
+    @JsonProperty("appointmentTypeLabel")
+    public String getAppointmentTypeLabel() {
         return type;
     }
 
     @JsonProperty("appointmentTypeCode")
     public String getAppointmentTypeCode() {
         return typeCode;
+    }
+
+    @JsonProperty("isReExamination")
+    public boolean getIsReExamination() {
+        return followUp;
+    }
+
+    @JsonProperty("originalAppointmentId")
+    public Integer getOriginalAppointmentId() {
+        return parentAppointmentId;
     }
 
     @JsonProperty("canComplete")

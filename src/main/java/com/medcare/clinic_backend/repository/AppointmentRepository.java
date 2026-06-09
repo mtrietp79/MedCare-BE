@@ -73,6 +73,17 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
     @Query("""
             SELECT COUNT(a)
             FROM Appointment a
+            WHERE a.doctor.specialty.id = :specialtyId
+            """)
+    long countByDoctorSpecialtyId(@Param("specialtyId") Integer specialtyId);
+
+    long countByPatientId(Integer patientId);
+
+    long countByPatientIdAndStatus(Integer patientId, String status);
+
+    @Query("""
+            SELECT COUNT(a)
+            FROM Appointment a
             WHERE a.doctor.id = :doctorId
               AND a.appointmentDate >= :now
               AND UPPER(COALESCE(a.status, '')) NOT IN ('CANCELLED', 'COMPLETED')
@@ -192,4 +203,6 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Intege
     List<Object[]> countDistinctPatientsByYearGroupedByMonth(@Param("year") Integer year);
 
     List<Appointment> findTop10ByOrderByAppointmentDateDesc();
+
+    List<Appointment> findTop5ByPatientIdOrderByAppointmentDateDesc(Integer patientId);
 }

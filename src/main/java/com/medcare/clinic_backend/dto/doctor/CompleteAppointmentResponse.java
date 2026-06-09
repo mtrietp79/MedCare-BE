@@ -102,6 +102,11 @@ public class CompleteAppointmentResponse {
 
         @JsonProperty("appointmentType")
         public String getAppointmentType() {
+            return getTypeCode();
+        }
+
+        @JsonProperty("appointmentTypeLabel")
+        public String getAppointmentTypeLabel() {
             return type;
         }
 
@@ -112,12 +117,22 @@ public class CompleteAppointmentResponse {
 
         @JsonProperty("typeCode")
         public String getTypeCode() {
-            return "T\u00e1i kh\u00e1m".equals(type) ? "FOLLOW_UP" : "NEW_EXAM";
+            return "T\u00e1i kh\u00e1m".equals(type) ? "RE_EXAMINATION" : "EXAMINATION";
         }
 
         @JsonProperty("appointmentTypeCode")
         public String getAppointmentTypeCode() {
             return getTypeCode();
+        }
+
+        @JsonProperty("isReExamination")
+        public boolean getIsReExamination() {
+            return "RE_EXAMINATION".equals(getTypeCode());
+        }
+
+        @JsonProperty("originalAppointmentId")
+        public Integer getOriginalAppointmentId() {
+            return parentAppointmentId;
         }
     }
 }

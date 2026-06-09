@@ -2,6 +2,7 @@ package com.medcare.clinic_backend.controller;
 
 import com.medcare.clinic_backend.dto.invoice.FinanceSummaryResponse;
 import com.medcare.clinic_backend.dto.invoice.InvoiceResponse;
+import com.medcare.clinic_backend.dto.invoice.PatientInvoiceDetailResponse;
 import com.medcare.clinic_backend.entity.Doctor;
 import com.medcare.clinic_backend.entity.Invoice;
 import com.medcare.clinic_backend.entity.Patient;
@@ -124,21 +125,23 @@ public class InvoiceController {
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "keyword", required = false) String keyword,
             @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "type", required = false) String type,
             Authentication authentication
     ) {
         Patient currentPatient = getCurrentPatientOrThrow(authentication);
-        return financeService.getInvoiceResponsesForPatient(currentPatient.getId(), keyword, status, category);
+        return financeService.getInvoiceResponsesForPatient(currentPatient.getId(), keyword, status, category, type);
     }
 
     @GetMapping("/my/{id}")
     @PreAuthorize("hasAuthority('ROLE_PATIENT')")
-    public InvoiceResponse getMyInvoiceById(@PathVariable Integer id, Authentication authentication) {
+    public PatientInvoiceDetailResponse getMyInvoiceById(
+            @PathVariable Integer id,
+            @RequestParam(value = "sourceType", required = false) String sourceType,
+            @RequestParam(value = "uniqueKey", required = false) String uniqueKey,
+            Authentication authentication
+    ) {
         Patient currentPatient = getCurrentPatientOrThrow(authentication);
-        InvoiceResponse invoice = financeService.getInvoiceResponseByIdForPatient(id, currentPatient.getId());
-        if (invoice == null) {
-            throw new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay hoa don ID: " + id);
-        }
-        return invoice;
+        return financeService.getPatientInvoiceDetail(currentPatient.getId(), id, sourceType, uniqueKey);
     }
 
     @GetMapping("/my/record/{recordId}")

@@ -30,6 +30,7 @@ public class PaymentController {
     @GetMapping("/create-url")
     @PreAuthorize("hasAuthority('ROLE_PATIENT')")
     public String createPaymentUrl(@RequestParam("appointmentId") Integer appointmentId,
+                                   @RequestParam(value = "returnUrl", required = false) String returnUrl,
                                    Authentication authentication,
                                    HttpServletRequest request) {
         if (appointmentId == null) {
@@ -38,13 +39,15 @@ public class PaymentController {
         return paymentService.createPaymentUrl(
                 appointmentId,
                 VNPayConfig.getIpAddress(request),
-                authentication == null ? null : authentication.getName()
+                authentication == null ? null : authentication.getName(),
+                returnUrl
         );
     }
 
     @GetMapping("/create-invoice-url")
     @PreAuthorize("hasAuthority('ROLE_PATIENT')")
     public String createInvoicePaymentUrl(@RequestParam("invoiceId") Integer invoiceId,
+                                          @RequestParam(value = "returnUrl", required = false) String returnUrl,
                                           Authentication authentication,
                                           HttpServletRequest request) {
         if (invoiceId == null) {
@@ -53,13 +56,15 @@ public class PaymentController {
         return paymentService.createInvoicePaymentUrl(
                 invoiceId,
                 VNPayConfig.getIpAddress(request),
-                authentication == null ? null : authentication.getName()
+                authentication == null ? null : authentication.getName(),
+                returnUrl
         );
     }
 
     @GetMapping("/create-service-package-url")
     @PreAuthorize("hasAuthority('ROLE_PATIENT')")
     public String createServicePackagePaymentUrl(@RequestParam("bookingId") Integer bookingId,
+                                                 @RequestParam(value = "returnUrl", required = false) String returnUrl,
                                                  Authentication authentication,
                                                  HttpServletRequest request) {
         if (bookingId == null) {
@@ -68,7 +73,8 @@ public class PaymentController {
         return paymentService.createServicePackagePaymentUrl(
                 bookingId,
                 VNPayConfig.getIpAddress(request),
-                authentication == null ? null : authentication.getName()
+                authentication == null ? null : authentication.getName(),
+                returnUrl
         );
     }
 

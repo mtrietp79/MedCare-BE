@@ -1,6 +1,7 @@
 package com.medcare.clinic_backend.dto.patient;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.medcare.clinic_backend.dto.cancellation.PatientCancellationRequestSummary;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -20,24 +21,36 @@ public class PatientAppointmentResponse {
     private LocalTime appointmentTime;
     private String appointmentTimeLabel;
     private String appointmentType;
+    private String appointmentTypeLabel;
+    private Boolean isReExamination;
     private String status;
+    private String statusLabel;
     private Double consultationFee;
     private String paymentStatus;
+    private String paymentStatusLabel;
     private Integer parentAppointmentId;
     private String followUpNote;
+    private PatientCancellationRequestSummary cancellationRequest;
+    private Boolean isCancelled;
+    private Boolean hasCancellationRequest;
 
     @JsonProperty("type")
     public String getType() {
-        return appointmentType;
+        return appointmentTypeLabel;
     }
 
     @JsonProperty("typeCode")
     public String getTypeCode() {
-        return "T\u00e1i kh\u00e1m".equals(appointmentType) ? "FOLLOW_UP" : "NEW_EXAM";
+        return appointmentType;
     }
 
     @JsonProperty("appointmentTypeCode")
     public String getAppointmentTypeCode() {
-        return getTypeCode();
+        return appointmentType;
+    }
+
+    @JsonProperty("originalAppointmentId")
+    public Integer getOriginalAppointmentId() {
+        return parentAppointmentId;
     }
 }

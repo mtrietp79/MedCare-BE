@@ -2,6 +2,8 @@ package com.medcare.clinic_backend.service;
 
 import com.medcare.clinic_backend.dto.BookingRulesDto;
 import com.medcare.clinic_backend.dto.SlotAvailabilityDto;
+import com.medcare.clinic_backend.dto.cancellation.CreateCancellationRequestDto;
+import com.medcare.clinic_backend.dto.cancellation.PatientCancellationRequestSummary;
 import com.medcare.clinic_backend.dto.patient.PatientAppointmentResponse;
 import com.medcare.clinic_backend.entity.Appointment;
 import com.medcare.clinic_backend.entity.Doctor;
@@ -13,6 +15,8 @@ import com.medcare.clinic_backend.exception.BusinessException;
 import com.medcare.clinic_backend.repository.AppointmentRepository;
 import com.medcare.clinic_backend.repository.DoctorScheduleRepository;
 import com.medcare.clinic_backend.repository.DoctorRepository;
+import com.medcare.clinic_backend.util.AppointmentTypeCatalog;
+import com.medcare.clinic_backend.util.AppointmentTypeCatalog.ResolvedType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -28,13 +32,17 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 public class AppointmentService {
 
-    private static final Set<String> ALLOWED_STATUSES = Set.of("PENDING_PAYMENT", "PENDING", "CONFIRMED", "COMPLETED", "CANCELLED");
+    private static final Set<String> ALLOWED_STATUSES = Set.of(
+            "PENDING_PAYMENT", "PENDING", "CONFIRMED", "COMPLETED", "CANCELLED",
+            "CANCEL_REQUESTED", "CANCEL_REJECTED"
+    );
     private static final int MIN_BOOKING_LEAD_HOURS = 2;
     private static final int MAX_BOOKING_AHEAD_DAYS = 14;
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -58,6 +66,9 @@ public class AppointmentService {
     @Autowired
     private AppointmentSlotService appointmentSlotService;
 
+    @Autowired
+    private AppointmentCancellationService appointmentCancellationService;
+
     public List<Appointment> getAllAppointments() {
         return appointmentRepository.findAll();
     }
@@ -67,9 +78,18 @@ public class AppointmentService {
     }
 
     public List<PatientAppointmentResponse> getAppointmentResponsesForPatient(Integer patientId) {
-        return appointmentRepository.findByPatientIdOrderByAppointmentDateDesc(patientId)
-                .stream()
-                .map(this::toPatientAppointmentResponse)
+        List<Appointment> appointments = appointmentRepository.findByPatientIdOrderByAppointmentDateDesc(patientId);
+        List<Integer> appointmentIds = appointments.stream()
+                .map(Appointment::getId)
+                .filter(id -> id != null)
+                .toList();
+        Map<Integer, PatientCancellationRequestSummary> cancellationByAppointmentId =
+                appointmentCancellationService.getLatestCancellationSummariesByAppointmentIds(appointmentIds);
+        return appointments.stream()
+                .map(appointment -> toPatientAppointmentResponse(
+                        appointment,
+                        cancellationByAppointmentId.get(appointment.getId())
+                ))
                 .toList();
     }
 
@@ -299,16 +319,29 @@ public class AppointmentService {
         if ("COMPLETED".equals(currentStatus)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "Khong the huy lich hen da hoan tat.");
         }
-        if ("CANCELLED".equals(currentStatus)) {
+        if ("CANCELLED".equals(currentStatus) || "CANCEL_REQUESTED".equals(currentStatus)) {
             return appointment;
         }
-
-        appointment.setStatus("CANCELLED");
-        if (!"PAID".equalsIgnoreCase(appointment.getPaymentStatus())
-                && !"PAID_ONLINE".equalsIgnoreCase(appointment.getPaymentStatus())) {
-            appointment.setPaymentStatus("CANCELLED");
+        if ("PAID".equalsIgnoreCase(appointment.getPaymentStatus())
+                || "PAID_ONLINE".equalsIgnoreCase(appointment.getPaymentStatus())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST,
+                    "Lich da thanh toan. Vui long gui yeu cau huy va hoan tien qua trang lich hen.");
         }
-        return appointmentRepository.save(appointment);
+
+        CreateCancellationRequestDto request = new CreateCancellationRequestDto();
+        request.setCancelReason("Benh nhan huy lich");
+        appointmentCancellationService.createCancellationRequest(appointmentId, patientId, request);
+        return appointmentRepository.findByIdAndPatientId(appointmentId, patientId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen ID: " + appointmentId));
+    }
+
+    public PatientAppointmentResponse getAppointmentResponseForPatient(Integer patientId, Integer appointmentId) {
+        Appointment appointment = appointmentRepository.findByIdAndPatientId(appointmentId, patientId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "Khong tim thay lich hen."));
+        PatientCancellationRequestSummary cancellationRequest = appointmentCancellationService
+                .getLatestCancellationSummariesByAppointmentIds(List.of(appointment.getId()))
+                .get(appointment.getId());
+        return toPatientAppointmentResponse(appointment, cancellationRequest);
     }
 
     @Transactional
@@ -715,9 +748,16 @@ public class AppointmentService {
     }
 
     private PatientAppointmentResponse toPatientAppointmentResponse(Appointment appointment) {
+        return toPatientAppointmentResponse(appointment, null);
+    }
+
+    private PatientAppointmentResponse toPatientAppointmentResponse(Appointment appointment,
+                                                                    PatientCancellationRequestSummary cancellationRequest) {
         LocalDateTime dateTime = appointment == null ? null : appointment.getAppointmentDate();
         LocalTime appointmentTime = dateTime == null ? null : dateTime.toLocalTime();
-        String appointmentType = resolveAppointmentType(appointment);
+        ResolvedType resolvedType = AppointmentTypeCatalog.resolve(appointment);
+        String statusCode = resolveStatusCode(appointment == null ? null : appointment.getStatus());
+        String paymentStatusCode = resolvePaymentStatusCode(appointment == null ? null : appointment.getPaymentStatus());
         return new PatientAppointmentResponse(
                 appointment == null ? null : appointment.getId(),
                 appointment == null ? null : appointment.getAppointmentCode(),
@@ -726,13 +766,75 @@ public class AppointmentService {
                 dateTime == null ? null : dateTime.toLocalDate(),
                 appointmentTime,
                 appointmentTime == null ? null : appointmentTime.format(TIME_FORMATTER),
-                appointmentType,
-                resolveStatusDisplay(appointment == null ? null : appointment.getStatus()),
+                resolvedType.code(),
+                resolvedType.label(),
+                resolvedType.reExamination(),
+                statusCode,
+                AppointmentCancellationService.resolveAppointmentStatusLabel(statusCode),
                 appointment == null ? null : appointment.getConsultationFee(),
-                resolvePaymentStatusDisplay(appointment == null ? null : appointment.getPaymentStatus()),
-                appointment == null ? null : appointment.getParentAppointmentId(),
-                isFollowUpAppointment(appointment) ? resolveFollowUpNote(appointment) : null
+                paymentStatusCode,
+                AppointmentCancellationService.resolvePaymentStatusLabel(paymentStatusCode, statusCode),
+                resolvedType.originalAppointmentId(),
+                resolvedType.reExamination() ? resolveFollowUpNote(appointment) : null,
+                cancellationRequest,
+                AppointmentCancellationService.isCancelledAppointmentStatus(statusCode),
+                cancellationRequest != null
         );
+    }
+
+    private String resolveStatusCode(String status) {
+        if (status == null || status.isBlank()) {
+            return "PENDING";
+        }
+        String upper = status.trim().toUpperCase(Locale.ROOT);
+        if (upper.contains("CANCEL_REQUEST")) {
+            return "CANCEL_REQUESTED";
+        }
+        if (upper.contains("CANCEL_REJECT")) {
+            return "CANCEL_REJECTED";
+        }
+        if (upper.contains("CANCEL")) {
+            return "CANCELLED";
+        }
+        if (upper.contains("COMPLETED")) {
+            return "COMPLETED";
+        }
+        if (upper.contains("CONFIRMED")) {
+            return "CONFIRMED";
+        }
+        if (upper.contains("PENDING_PAYMENT")) {
+            return "PENDING_PAYMENT";
+        }
+        return upper;
+    }
+
+    private String resolvePaymentStatusCode(String status) {
+        if (status == null || status.isBlank()) {
+            return "UNPAID";
+        }
+        String upper = status.trim().toUpperCase(Locale.ROOT);
+        if ("PAID_ONLINE".equals(upper)) {
+            return "PAID_ONLINE";
+        }
+        if ("PAID".equals(upper)) {
+            return "PAID";
+        }
+        if (upper.contains("REFUND_PENDING")) {
+            return "REFUND_PENDING";
+        }
+        if (upper.contains("REFUNDED")) {
+            return "REFUNDED";
+        }
+        if (upper.contains("CANCEL")) {
+            return "CANCELLED";
+        }
+        if (upper.contains("FAIL")) {
+            return "FAILED";
+        }
+        if (upper.contains("PENDING")) {
+            return "PENDING";
+        }
+        return "UNPAID";
     }
 
     private String resolveSpecialtyName(Appointment appointment) {

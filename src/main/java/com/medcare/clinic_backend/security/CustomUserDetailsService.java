@@ -29,6 +29,11 @@ public class CustomUserDetailsService implements UserDetailsService {
         String normalizedRole = rawRole.startsWith("ROLE_") ? rawRole : "ROLE_" + rawRole;
         Set<GrantedAuthority> authorities = Collections.singleton(new SimpleGrantedAuthority(normalizedRole));
 
-        return new User(account.getUsername(), account.getPassword(), authorities);
+        boolean active = !Boolean.FALSE.equals(account.getIsActive());
+        return User.withUsername(account.getUsername())
+                .password(account.getPassword())
+                .authorities(authorities)
+                .disabled(!active)
+                .build();
     }
 }
